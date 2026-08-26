@@ -1,12 +1,12 @@
 # Akesa Backend
 
-Ini backend-nya Akesa — aplikasi pendaftaran pasien antar-rumah sakit, dengan
+Ini backend-nya Akesa - aplikasi pendaftaran pasien antar-rumah sakit, dengan
 audit trail berbasis hash chain (proof of concept "blockchain"-nya). Dibangun
 pakai Go 1.25, PostgreSQL, dan Clerk buat autentikasi.
 
 Dokumen ini isinya cara jalanin project-nya di lokal, gimana struktur kodenya
 disusun, dan contoh pakai tiap endpoint biar kalau mau tes atau connect dari
-Flutter nggak perlu nebak-nebak.
+Flutter gak perlu nebak-nebak.
 
 ## 1. Cara jalanin di lokal
 
@@ -58,10 +58,10 @@ persis, ada di `internal/<domain>/`:
 | `errors.go`     | error yang udah didefinisiin (`var ErrX = errors.New(...)`)  |
 | `repository.go` | tempat satu-satunya yang boleh nulis query SQL               |
 | `dto.go`        | bentuk request JSON + validasi input                         |
-| `service.go`    | logic bisnisnya, nggak tau soal HTTP sama sekali             |
+| `service.go`    | logic bisnisnya, gak tau soal HTTP sama sekali             |
 | `handler.go`    | urusan HTTP: baca JSON, panggil service, balikin response    |
 
-Alurnya selalu satu arah, nggak boleh lompat-lompat:
+Alurnya selalu satu arah, gak boleh lompat-lompat:
 
 ```
 handler -> service -> repository -> Postgres
@@ -71,11 +71,11 @@ handler -> service -> repository -> Postgres
 jadi satu. Jadi kalau mau nambah domain baru, yang perlu disentuh cuma: bikin
 folder baru di `internal/<domain_baru>/`, tambahin satu blok wiring di
 `main.go`, terus daftarin route-nya di `internal/server/server.go`. Udah,
-nggak perlu ubah-ubah domain lain.
+gak perlu ubah-ubah domain lain.
 
 ### Kenapa banyak banget `interface` kecil-kecil?
 
-Contohnya nih, package `patient` itu **nggak** import package `audit` sama
+Contohnya nih, package `patient` itu **gak** import package `audit` sama
 sekali. Tapi di `patient/service.go` ada begini:
 
 ```go
@@ -88,16 +88,16 @@ Kebetulan `audit.Service` punya method dengan tanda tangan yang sama persis,
 jadi dia otomatis "cocok" sama interface itu tanpa `patient` perlu tau
 package `audit` itu ada. Enaknya:
 
-- Nggak bakal ada import cycle antar domain (bikin pusing kalau kejadian).
-- Gampang di-unit-test — tinggal bikin mock kecil buat interface-nya, nggak
+- gak bakal ada import cycle antar domain (bikin pusing kalau kejadian).
+- Gampang di-unit-test - tinggal bikin mock kecil buat interface-nya, gak
   perlu nyalain Postgres beneran.
 - Kalau suatu saat `audit` mau diganti pake blockchain sungguhan (misal
-  Hyperledger), `patient` sama `access` nggak perlu diapa-apain.
+  Hyperledger), `patient` sama `access` gak perlu diapa-apain.
 
 Kalau bingung liat pola ini di tempat lain, itu memang sengaja, bukan salah
 ketik.
 
-## 3. Auth & Role — WAJIB DIBACA sebelum nambah endpoint
+## 3. Auth & Role - WAJIB DIBACA sebelum nambah endpoint
 
 - **Autentikasi** ditangani Clerk sepenuhnya. Mobile app kirim JWT Clerk di
   header `Authorization: Bearer <token>`, terus middleware
@@ -109,15 +109,15 @@ ketik.
   berdasarkan Clerk user id, terus nyimpen `{id, role, status}`-nya sebagai
   `AuthUser` di context request.
 - **`auth.RequireRole("ADMIN")`** baca `AuthUser` itu dari context, kalau
-  role-nya nggak cocok ya di-reject (403).
+  role-nya gak cocok ya di-reject (403).
 
-Urutan middleware-nya **harus** selalu kayak gini, nggak boleh dibolak-balik:
+Urutan middleware-nya **harus** selalu kayak gini, gak boleh dibolak-balik:
 
 ```go
 auth.RequireAuth -> auth.WithUser(userService) -> auth.RequireRole(...)
 ```
 
-Biar nggak capek nulis 3 middleware tiap route, ada helper `chain` di
+Biar gak capek nulis 3 middleware tiap route, ada helper `chain` di
 `internal/server/server.go`:
 
 ```go
@@ -126,7 +126,7 @@ s.mux.Handle("PATCH /api/v1/admin/hospitals/{id}/verify",
 )
 ```
 
-> Dulu sempet ada bug di `RequireRole` — parameter role-nya nggak dicek sama
+> Dulu sempet ada bug di `RequireRole` - parameter role-nya gak dicek sama
 > sekali, jadi siapa aja yang udah login bisa akses endpoint admin. Udah
 > diperbaiki, sekarang role-nya beneran dicek dari database, bukan dari
 > klaim yang dikirim client.
@@ -136,7 +136,7 @@ s.mux.Handle("PATCH /api/v1/admin/hospitals/{id}/verify",
    `auth.GetAuthUser(r)` setelah middleware jalan.
 2. Buat endpoint yang sifatnya milik satu user (misal approve access
    request), tetep cek kepemilikan di service layer (`req.PatientID ==
-   authUser.ID`). Role doang nggak cukup.
+   authUser.ID`). Role doang gak cukup.
 3. Endpoint yang khusus admin/staff wajib lewat `s.chain(..., RoleAdmin)`
    atau `s.chain(..., RoleStaff)`. Jangan taruh langsung di `mux.Handle`
    tanpa role check kalau memang harusnya dibatasi.
@@ -144,60 +144,60 @@ s.mux.Handle("PATCH /api/v1/admin/hospitals/{id}/verify",
 ## 4. Soal audit trail ("blockchain"-nya)
 
 `internal/audit` itu isinya hash chain di Postgres: tiap entri nyimpen
-`sha256(prevHash + data)`, jadi urutan kejadian nggak bisa diubah sepihak
+`sha256(prevHash + data)`, jadi urutan kejadian gak bisa diubah sepihak
 tanpa ngerusak seluruh rantai setelahnya. Ini yang jadi "permissioned
 blockchain proof of concept" yang disebut di SRS. **Data pribadi pasien
-nggak pernah masuk ke chain ini**, yang disimpen cuma hash-nya sama metadata
+gak pernah masuk ke chain ini**, yang disimpen cuma hash-nya sama metadata
 kecil (aksi apa, kapan, siapa).
 
 Interface-nya sengaja dipisah biar kalau nanti tim mau ganti ke blockchain
 permissioned beneran (misal Hyperledger Fabric), tinggal bikin implementasi
-baru dengan method yang sama — `patient` sama `access` nggak perlu diubah
+baru dengan method yang sama - `patient` sama `access` gak perlu diubah
 sama sekali.
 
-## 4.5. NIK — kenapa perlu diperlakukan beda dari field lain
+## 4.5. NIK - kenapa perlu diperlakukan beda dari field lain
 
 NIK itu data paling sensitif di seluruh sistem ini, jadi diperlakukan beda
 dari field lain kayak nama atau alamat. Ada dua masalah yang dipisahin, dan
 dua-duanya udah ditangani:
 
-**Masalah 1 — NIK kesimpen plain text di Postgres.**
+**Masalah 1 - NIK kesimpen plain text di Postgres.**
 Kalau database-nya suatu saat bocor/di-dump, NIK semua pasien ikut bocor
 mentah-mentah. Solusinya: `internal/crypto` nyediain `FieldCipher` yang
 ngenkripsi NIK (dan nomor asuransi) pake AES-256-GCM sebelum disimpen, dan
-otomatis didekripsi lagi pas dibaca. Prosesnya transparan — service &
+otomatis didekripsi lagi pas dibaca. Prosesnya transparan - service &
 handler tetep kerja sama string biasa, cuma `patient/repository.go` aja
 yang tau soal enkripsi ini. Yang kesimpen di kolom `nik` sekarang cuma
 ciphertext acak, beda tiap kali di-enkripsi ulang biar dua orang dengan NIK
-sama pun ciphertext-nya nggak keliatan mirip.
+sama pun ciphertext-nya gak keliatan mirip.
 
-**Masalah 2 — hash yang masuk ke audit chain bisa di-brute-force.**
+**Masalah 2 - hash yang masuk ke audit chain bisa di-brute-force.**
 Sebelumnya, hash yang dicatet ke audit chain itu `sha256(profil)` biasa.
 Kedengeran aman, tapi NIK cuma 16 digit dengan format yang lumayan
 terstruktur (kode wilayah + tanggal lahir + nomor urut), jadi ruang
-kemungkinannya nggak sebesar 16 digit acak — orang yang punya hash-nya bisa
+kemungkinannya gak sebesar 16 digit acak - orang yang punya hash-nya bisa
 nyoba brute-force offline nebak-nebak NIK sampe ketemu yang cocok.
 Solusinya: pake `KeyedHasher` (HMAC-SHA256 dengan secret key) buat hitung
 hash yang masuk ke chain, bukan SHA256 polos. Tanpa tau key-nya, brute-force
-itu jadi nggak feasible lagi.
+itu jadi gak feasible lagi.
 
 Ada 3 key terpisah yang dipakai (lihat `.env.example`):
-- `FIELD_ENCRYPTION_KEY` — buat enkripsi/dekripsi NIK & nomor asuransi.
-- `NIK_HASH_KEY` — buat hash pencarian/keunikan NIK yang kesimpen di kolom
+- `FIELD_ENCRYPTION_KEY` - buat enkripsi/dekripsi NIK & nomor asuransi.
+- `NIK_HASH_KEY` - buat hash pencarian/keunikan NIK yang kesimpen di kolom
   `nik_hash` (biar sistem masih bisa cek "NIK ini udah kedaftar belum" tanpa
   perlu dekripsi semua baris satu-satu).
-- `AUDIT_HASH_KEY` — buat hash yang masuk ke audit chain.
+- `AUDIT_HASH_KEY` - buat hash yang masuk ke audit chain.
 
-Sengaja dipisah tiga-tiganya (bukan satu key buat semua) — kalau salah satu
+Sengaja dipisah tiga-tiganya (bukan satu key buat semua) - kalau salah satu
 bocor entah gimana, yang lain masih aman. Di production, key-key ini
-jangan pernah ditaruh di `.env` biasa — pake secrets manager (AWS Secrets
+jangan pernah ditaruh di `.env` biasa - pake secrets manager (AWS Secrets
 Manager, Vault, dsb) dan rotate key-nya secara berkala.
 
 > Catatan buat yang udah sempet jalanin migrasi lama: migrasi
 > `000007_encrypt_sensitive_fields` ngasumsiin tabel `patient_profiles`
 > masih kosong. Kalau kamu udah sempet isi data dummy sebelum ini, hapus
 > aja datanya dulu (atau reset volume Postgres-nya) sebelum jalanin migrasi
-> ini, soalnya NIK yang kesimpen plain text sebelumnya nggak bisa
+> ini, soalnya NIK yang kesimpen plain text sebelumnya gak bisa
 > otomatis ke-enkripsi.
 
 ## 5. Semua endpoint & cara pakainya
@@ -214,7 +214,7 @@ Dan `POST`/`PUT` selalu `Content-Type: application/json`.
 
 #### `POST /api/v1/users/sync`
 Wajib dipanggil **sekali** habis user pertama kali login/daftar lewat Clerk
-— ini yang bikin baris di tabel `users` kita (role default-nya `PATIENT`).
+- ini yang bikin baris di tabel `users` kita (role default-nya `PATIENT`).
 Kalau belum pernah manggil ini, semua endpoint lain bakal nolak dengan
 `user_not_registered`. Idempotent, jadi aman dipanggil berkali-kali, kalau
 udah ada ya balikin yang udah ada aja.
@@ -245,8 +245,8 @@ curl http://localhost:8080/api/v1/me -H "Authorization: Bearer $TOKEN"
 ```
 
 #### `GET /api/v1/hospitals`
-List rumah sakit yang statusnya `ACTIVE` aja — buat pasien milih mau daftar
-ke rumah sakit mana. Nggak perlu role khusus, yang penting udah pernah sync.
+List rumah sakit yang statusnya `ACTIVE` aja - buat pasien milih mau daftar
+ke rumah sakit mana. gak perlu role khusus, yang penting udah pernah sync.
 
 ```bash
 curl http://localhost:8080/api/v1/hospitals -H "Authorization: Bearer $TOKEN"
@@ -260,7 +260,7 @@ Sebelum ini semua dipakai, user harus udah role `PATIENT` (default habis
 sync) dan udah bikin profile dulu.
 
 #### `POST /api/v1/patient/profile`
-Isi data diri sekali aja — ini yang bikin `patientCode` unik yang nanti
+Isi data diri sekali aja - ini yang bikin `patientCode` unik yang nanti
 dikasih ke petugas rumah sakit pas mau daftar.
 
 ```bash
@@ -282,12 +282,12 @@ Field opsional yang bisa ditambahin: `bloodType`, `insuranceNumber`,
 `MALE` atau `FEMALE`, `nik` harus persis 16 digit, `dateOfBirth` formatnya
 `YYYY-MM-DD`.
 
-Response bakal ngasih `patientCode` (contoh: `AKS-4F2A9C1D`) — **catet ini**,
+Response bakal ngasih `patientCode` (contoh: `AKS-4F2A9C1D`) - **catet ini**,
 soalnya ini yang dipakai petugas RS buat cari data kamu.
 
 NIK-nya sendiri disimpen terenkripsi di database (lihat section 4.5), tapi
-di request/response API tetep string biasa kayak biasa — enkripsinya
-kejadian di belakang layar, nggak ngubah cara app manggil endpoint ini.
+di request/response API tetep string biasa kayak biasa - enkripsinya
+kejadian di belakang layar, gak ngubah cara app manggil endpoint ini.
 Kalau NIK yang dikirim udah kepake di profile lain, bakal kena `409
 nik_already_registered`.
 
@@ -299,7 +299,7 @@ Update profile. Body-nya sama kayak `POST`, semua field wajib diisi ulang
 (bukan partial update).
 
 #### `GET /api/v1/patient/access-requests`
-List semua permintaan akses yang pernah masuk ke kamu — baik yang masih
+List semua permintaan akses yang pernah masuk ke kamu - baik yang masih
 `PENDING`, udah `APPROVED`, `REJECTED`, atau `REVOKED`.
 
 #### `POST /api/v1/patient/access-requests/{id}/approve`
@@ -317,12 +317,12 @@ punya kamu sendiri (dicek di server, bukan cuma dipercaya dari client).
 Sama kayak approve, tapi nolak. Sama-sama cuma bisa dari status `PENDING`.
 
 #### `POST /api/v1/patient/access-requests/{id}/revoke`
-Ini beda — buat nyabut akses yang **sebelumnya udah di-approve**. Bisa
-kapan aja, nggak ada batas waktu. Habis di-revoke, RS yang bersangkutan
-langsung nggak bisa lagi ambil data lewat request itu.
+Ini beda - buat nyabut akses yang **sebelumnya udah di-approve**. Bisa
+kapan aja, gak ada batas waktu. Habis di-revoke, RS yang bersangkutan
+langsung gak bisa lagi ambil data lewat request itu.
 
 #### `GET /api/v1/patient/history`
-Riwayat lengkap — semua perubahan profile, keputusan approve/reject/revoke,
+Riwayat lengkap - semua perubahan profile, keputusan approve/reject/revoke,
 sama kapan aja data kamu diakses RS. Ini yang narik dari audit hash chain.
 
 ---
@@ -348,7 +348,7 @@ curl -X POST http://localhost:8080/api/v1/hospital/access-requests \
 ```
 
 Kategori yang valid: `IDENTITY`, `CONTACT`, `MEDICAL_BASIC`, `INSURANCE`,
-`EMERGENCY_CONTACT`. Minta secukupnya aja sesuai kebutuhan pendaftaran —
+`EMERGENCY_CONTACT`. Minta secukupnya aja sesuai kebutuhan pendaftaran -
 sistemnya emang didesain biar RS cuma minta kategori yang relevan, bukan
 "kasih semua data lu".
 
@@ -357,7 +357,7 @@ List semua request yang pernah diajukan RS kamu (bukan cuma yang kamu ajuin
 sendiri, tapi semua staff di RS yang sama), plus status-nya masing-masing.
 
 #### `GET /api/v1/hospital/access-requests/{id}/data`
-Ambil data pasiennya — **cuma jalan kalau request-nya udah `APPROVED`**.
+Ambil data pasiennya - **cuma jalan kalau request-nya udah `APPROVED`**.
 Kalau masih pending atau udah di-revoke, bakal ditolak.
 
 ```bash
@@ -376,8 +376,8 @@ kalau cuma disetujui `IDENTITY`:
   "gender": "MALE"
 }
 ```
-Nomor telepon, alamat, dst nggak bakal ikut kebawa kalau kategori `CONTACT`
-nggak disetujui. Tiap kali endpoint ini dipanggil, otomatis kecatet di audit
+Nomor telepon, alamat, dst gak bakal ikut kebawa kalau kategori `CONTACT`
+gak disetujui. Tiap kali endpoint ini dipanggil, otomatis kecatet di audit
 log sebagai `DATA_ACCESSED`.
 
 ---
@@ -414,12 +414,12 @@ cuma nampilin yang `ACTIVE`).
 Ubah status dari `PENDING` ke `VERIFIED`.
 
 #### `PATCH /api/v1/admin/hospitals/{id}/activate`
-Ubah ke `ACTIVE` — abis ini baru rumah sakitnya nongol di `GET /hospitals`
+Ubah ke `ACTIVE` - abis ini baru rumah sakitnya nongol di `GET /hospitals`
 dan staff-nya bisa mulai ngajuin access request.
 
 #### `PATCH /api/v1/admin/hospitals/{id}/deactivate`
 Nonaktifin RS. Semua tiga endpoint di atas bentuknya sama, cuma beda status
-tujuannya, dan sama-sama nggak butuh body.
+tujuannya, dan sama-sama gak butuh body.
 
 ```bash
 curl -X PATCH http://localhost:8080/api/v1/admin/hospitals/<id>/activate \
@@ -448,9 +448,9 @@ curl -X POST http://localhost:8080/api/v1/admin/hospitals/<hospitalId>/staff \
 2. Petugas RS (yang udah dilink admin) ajuin access request pake
    `patientCode` itu, sebutin `categories` yang dibutuhin.
 3. Pasien buka `GET /patient/access-requests`, nemu request-nya, approve.
-4. Petugas RS `GET /hospital/access-requests/{id}/data` — dapet data sesuai
+4. Petugas RS `GET /hospital/access-requests/{id}/data` - dapet data sesuai
    kategori yang disetujui.
-5. Kapan pun pasien berubah pikiran, tinggal revoke, dan RS langsung nggak
+5. Kapan pun pasien berubah pikiran, tinggal revoke, dan RS langsung gak
    bisa ambil data lagi lewat request itu.
 6. Semua langkah di atas otomatis kecatet di audit trail, bisa diliat
    pasien lewat `GET /patient/history`.
@@ -460,10 +460,10 @@ curl -X POST http://localhost:8080/api/v1/admin/hospitals/<hospitalId>/staff \
 - Satu branch per fitur/domain aja, misal `feature/hospital-crud`,
   `feature/access-request-flow`. Jangan digabung-gabung.
 - Migrasi SQL selalu bikin sepasang `.up.sql` / `.down.sql`, nomor urut naik
-  terus. Kalau migrasi udah di-merge ke main, jangan diedit lagi — bikin
+  terus. Kalau migrasi udah di-merge ke main, jangan diedit lagi - bikin
   migrasi baru aja kalau mau ubah sesuatu.
 - Sebelum bikin PR, minimal jalanin `make fmt`, terus pastiin
-  `go build ./...` sama `go vet ./...` bersih, nggak ada warning/error.
+  `go build ./...` sama `go vet ./...` bersih, gak ada warning/error.
 - Error di tiap domain selalu pake sentinel error (`var ErrX =
   errors.New(...)`) terus dicek pake `errors.Is(...)`. Jangan bandingin
   string pesan error-nya langsung, gampang salah kalau pesannya berubah.
