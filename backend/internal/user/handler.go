@@ -2,6 +2,7 @@ package user
 
 import (
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/farhan-hamzah/Akesa/backend/internal/auth"
@@ -27,16 +28,41 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	currentUser, err := h.service.GetByClerkUserID(r.Context(), clerkUserID)
+	log.Printf("Me: clerk_user_id=%s", clerkUserID)
+
+	currentUser, err := h.service.GetByClerkUserID(
+		r.Context(),
+		clerkUserID,
+	)
+
 	if err != nil {
+		log.Printf(
+			"Me: failed to get user clerk_id=%s: %v",
+			clerkUserID,
+			err,
+		)
+
 		if errors.Is(err, ErrUserNotFound) {
-			response.Error(w, http.StatusNotFound, "user_not_found")
+			response.Error(
+				w,
+				http.StatusNotFound,
+				"user_not_found",
+			)
 			return
 		}
 
-		response.Error(w, http.StatusInternalServerError, "internal_server_error")
+		response.Error(
+			w,
+			http.StatusInternalServerError,
+			"internal_server_error",
+		)
 		return
 	}
+
+	log.Printf(
+		"Me: user found clerk_id=%s",
+		clerkUserID,
+	)
 
 	response.JSON(w, http.StatusOK, currentUser)
 }

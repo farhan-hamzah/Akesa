@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -50,6 +51,12 @@ func WithUser(loader UserLoader) func(http.Handler) http.Handler {
 
 			authUser, err := loader.LoadAuthUser(r.Context(), clerkUserID)
 			if err != nil {
+				log.Printf(
+					"WithUser: failed to load user clerk_id=%s: %v",
+					clerkUserID,
+					err,
+				)
+
 				if errors.Is(err, ErrUserNotFound) {
 					http.Error(
 						w,
@@ -59,7 +66,11 @@ func WithUser(loader UserLoader) func(http.Handler) http.Handler {
 					return
 				}
 
-				http.Error(w, `{"error":"internal_server_error"}`, http.StatusInternalServerError)
+				http.Error(
+					w,
+					`{"error":"internal_server_error"}`,
+					http.StatusInternalServerError,
+				)
 				return
 			}
 

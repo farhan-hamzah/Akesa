@@ -11,8 +11,9 @@ class AuthPage extends StatelessWidget {
     return ClerkErrorListener(
       child: ClerkAuthBuilder(
         signedInBuilder: (context, authState) {
-          return const ApiTestPage();
+          return ApiTestPage(authState: authState);
         },
+
         signedOutBuilder: (context, authState) {
           return const Scaffold(body: SafeArea(child: ClerkAuthentication()));
         },

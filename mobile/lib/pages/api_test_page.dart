@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 class ApiTestPage extends StatefulWidget {
-  const ApiTestPage({super.key});
+  final ClerkAuthState authState;
+
+  const ApiTestPage({super.key, required this.authState});
 
   @override
   State<ApiTestPage> createState() => _ApiTestPageState();
@@ -13,15 +15,51 @@ class ApiTestPage extends StatefulWidget {
 
 class _ApiTestPageState extends State<ApiTestPage> {
   String result = 'Belum ada request';
-
   bool loading = false;
 
   static const String baseUrl = 'http://10.0.2.2:9090';
 
+  // ============================================================
+  // GET CLERK SESSION TOKEN
+  // ============================================================
+
+  Future<String?> getSessionToken() async {
+    try {
+      if (!widget.authState.isSignedIn) {
+        if (mounted) {
+          setState(() {
+            result = 'User belum login ke Clerk.';
+          });
+        }
+
+        return null;
+      }
+
+      final sessionToken = await widget.authState.sessionToken();
+
+      return sessionToken.jwt;
+    } catch (e, stackTrace) {
+      debugPrint('Gagal mengambil Clerk token: $e');
+      debugPrint('$stackTrace');
+
+      if (mounted) {
+        setState(() {
+          result = 'Gagal mendapatkan Clerk session token:\n$e';
+        });
+      }
+
+      return null;
+    }
+  }
+
+  // ============================================================
+  // HEALTH CHECK
+  // ============================================================
+
   Future<void> testHealth() async {
     setState(() {
       loading = true;
-      result = 'Loading...';
+      result = 'Menghubungi backend...';
     });
 
     try {
@@ -40,21 +78,17 @@ ${response.body}
         result = 'ERROR:\n$e';
       });
     } finally {
-      setState(() {
-        loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          loading = false;
+        });
+      }
     }
   }
 
-  Future<String?> getSessionToken() async {
-    setState(() {
-      result =
-          'Session token belum dapat diambil.\n'
-          'API session Clerk perlu disesuaikan dengan versi clerk_flutter.';
-    });
-
-    return null;
-  }
+  // ============================================================
+  // GET /api/v1/me
+  // ============================================================
 
   Future<void> testMe() async {
     setState(() {
@@ -72,19 +106,14 @@ ${response.body}
         return;
       }
 
-      setState(() {
-        result = '''
-Session token berhasil didapatkan.
-
-Mengirim request ke Go API...
-''';
-      });
+      debugPrint('Mengirim token ke /api/v1/me');
 
       final response = await http.get(
         Uri.parse('$baseUrl/api/v1/me'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
       );
 
@@ -94,7 +123,9 @@ Mengirim request ke Go API...
         final json = jsonDecode(response.body);
 
         body = const JsonEncoder.withIndent('  ').convert(json);
-      } catch (_) {}
+      } catch (_) {
+        // Response bukan JSON
+      }
 
       setState(() {
         result =
@@ -109,11 +140,17 @@ $body
         result = 'ERROR:\n$e';
       });
     } finally {
-      setState(() {
-        loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          loading = false;
+        });
+      }
     }
   }
+
+  // ============================================================
+  // POST /api/v1/users/sync
+  // ============================================================
 
   Future<void> testSync() async {
     setState(() {
@@ -136,6 +173,7 @@ $body
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
       );
 
@@ -160,11 +198,17 @@ $body
         result = 'ERROR:\n$e';
       });
     } finally {
-      setState(() {
-        loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          loading = false;
+        });
+      }
     }
   }
+
+  // ============================================================
+  // SHOW SESSION TOKEN
+  // ============================================================
 
   Future<void> showSessionToken() async {
     setState(() {
@@ -195,16 +239,63 @@ $token
         result = 'ERROR:\n$e';
       });
     } finally {
-      setState(() {
-        loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          loading = false;
+        });
+      }
     }
   }
+
+  // ============================================================
+  // LOGOUT
+  // ============================================================
+
+  Future<void> logout() async {
+    try {
+      setState(() {
+        loading = true;
+        result = 'Logging out...';
+      });
+
+      await widget.authState.signOut();
+
+      debugPrint('Clerk logout berhasil.');
+    } catch (e, stackTrace) {
+      debugPrint('Gagal logout: $e');
+      debugPrint('$stackTrace');
+
+      if (mounted) {
+        setState(() {
+          result = 'Gagal logout:\n$e';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          loading = false;
+        });
+      }
+    }
+  }
+
+  // ============================================================
+  // UI
+  // ============================================================
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Akesa API Test')),
+      appBar: AppBar(
+        title: const Text('Akesa API Test'),
+        actions: [
+          IconButton(
+            tooltip: 'Logout',
+            onPressed: loading ? null : logout,
+            icon: const Icon(Icons.logout),
+          ),
+        ],
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
