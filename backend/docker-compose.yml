@@ -1,16 +1,21 @@
 services:
   postgres:
-    image: postgres:17
+    image: postgres:16-alpine
     container_name: akesa-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: akesa
-      POSTGRES_PASSWORD: akesa_dev_password
+      POSTGRES_PASSWORD: akesa
       POSTGRES_DB: akesa
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - akesa_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U akesa -d akesa"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
-  postgres_data:
+  akesa_postgres_data:

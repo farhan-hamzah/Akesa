@@ -14,6 +14,17 @@ const (
 	RoleAdmin         Role = "ADMIN"
 )
 
+var validRoles = map[Role]struct{}{
+	RolePatient:       {},
+	RoleHospitalStaff: {},
+	RoleAdmin:         {},
+}
+
+func IsValidRole(r Role) bool {
+	_, ok := validRoles[r]
+	return ok
+}
+
 type Status string
 
 const (
