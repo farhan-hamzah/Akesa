@@ -350,7 +350,7 @@ curl -X POST http://localhost:8080/api/v1/hospital/access-requests \
 Kategori yang valid: `IDENTITY`, `CONTACT`, `MEDICAL_BASIC`, `INSURANCE`,
 `EMERGENCY_CONTACT`. Minta secukupnya aja sesuai kebutuhan pendaftaran -
 sistemnya emang didesain biar RS cuma minta kategori yang relevan, bukan
-"kasih semua data lu".
+"kasih semua datanya".
 
 #### `GET /api/v1/hospital/access-requests`
 List semua request yang pernah diajukan RS kamu (bukan cuma yang kamu ajuin
