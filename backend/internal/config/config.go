@@ -30,16 +30,24 @@ type Config struct {
 	// hash that gets written into the audit hash chain. Also
 	// deliberately separate from the other two keys.
 	AuditHashKey []byte
+
+	// Blockchain layer configuration (optional; falls back to local cryptographic ledger if empty)
+	BlockchainRPCURL          string
+	BlockchainContractAddress string
+	BlockchainFromAddress     string
 }
 
 func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	config := &Config{
-		AppEnv:         os.Getenv("APP_ENV"),
-		Port:           os.Getenv("PORT"),
-		DatabaseURL:    os.Getenv("DATABASE_URL"),
-		ClerkSecretKey: os.Getenv("CLERK_SECRET_KEY"),
+		AppEnv:                    os.Getenv("APP_ENV"),
+		Port:                      os.Getenv("PORT"),
+		DatabaseURL:               os.Getenv("DATABASE_URL"),
+		ClerkSecretKey:            os.Getenv("CLERK_SECRET_KEY"),
+		BlockchainRPCURL:          os.Getenv("BLOCKCHAIN_RPC_URL"),
+		BlockchainContractAddress: os.Getenv("BLOCKCHAIN_CONTRACT_ADDRESS"),
+		BlockchainFromAddress:     os.Getenv("BLOCKCHAIN_FROM_ADDRESS"),
 	}
 
 	if config.AppEnv == "" {

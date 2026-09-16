@@ -33,3 +33,25 @@ func (h *Handler) MyProfileHistory(w http.ResponseWriter, r *http.Request) {
 
 	response.JSON(w, http.StatusOK, logs)
 }
+
+// VerifyChain - GET /api/v1/audit/verify-chain
+// Cryptographically checks all blocks in the audit hash chain.
+func (h *Handler) VerifyChain(w http.ResponseWriter, r *http.Request) {
+	valid, totalBlocks, err := h.service.VerifyChainIntegrity(r.Context())
+	if err != nil {
+		response.JSON(w, http.StatusOK, map[string]any{
+			"valid":       false,
+			"totalBlocks": totalBlocks,
+			"status":      "TAMPERED_OR_BROKEN",
+			"error":       err.Error(),
+		})
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]any{
+		"valid":       valid,
+		"totalBlocks": totalBlocks,
+		"status":      "VERIFIED_INTACT",
+		"message":     "All SHA-256 block hashes verified and intact",
+	})
+}

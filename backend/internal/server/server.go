@@ -56,7 +56,9 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) registerRoutes(deps Dependencies) {
+	s.mux.HandleFunc("GET /{$}", rootHandler)
 	s.mux.HandleFunc("GET /health", healthHandler)
+	s.mux.HandleFunc("GET /api/v1/audit/verify-chain", deps.AuditHandler.VerifyChain)
 
 	// --- Account bootstrap: any authenticated Clerk principal, no role
 	// check yet (role doesn't exist in our DB until /sync runs once). ---
@@ -139,6 +141,12 @@ func (s *Server) chain(deps Dependencies, final http.Handler, roles ...string) h
 		mws = append(mws, auth.RequireRole(roles...))
 	}
 	return appmiddleware.Chain(mws...)(final)
+}
+
+func rootHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"name":"Akesa API","status":"running","health":"/health"}`))
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {

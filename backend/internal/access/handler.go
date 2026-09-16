@@ -164,6 +164,8 @@ func (h *Handler) writeServiceError(w http.ResponseWriter, err error) {
 		response.Error(w, http.StatusConflict, "access_request_not_pending")
 	case errors.Is(err, ErrNotApproved):
 		response.Error(w, http.StatusConflict, "access_request_not_approved")
+	case errors.Is(err, ErrDataTampered):
+		response.Error(w, http.StatusConflict, "patient_data_integrity_violation")
 	case errors.Is(err, patient.ErrProfileNotFound):
 		response.Error(w, http.StatusNotFound, "patient_not_found")
 	default:

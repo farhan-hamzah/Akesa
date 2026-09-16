@@ -14,6 +14,7 @@ import (
 type PatientLookup interface {
 	GetByPatientCode(ctx context.Context, patientCode string) (*patient.Profile, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*patient.Profile, error)
+	ComputeHash(profile *patient.Profile) string
 }
 
 // StaffLookup is the slice of hospital.Service this package depends on, to
@@ -25,6 +26,8 @@ type StaffLookup interface {
 // AuditRecorder is the slice of audit.Service this package depends on.
 type AuditRecorder interface {
 	RecordAccessEvent(ctx context.Context, entityType string, entityID uuid.UUID, action string, actorID uuid.UUID, payload map[string]any) error
+	VerifyProfileOnChain(ctx context.Context, patientID uuid.UUID, currentHash string) (bool, string, error)
+	GetLatestProfileHash(ctx context.Context, patientID uuid.UUID) (string, error)
 }
 
 const entityTypeAccessRequest = "ACCESS_REQUEST"
@@ -174,9 +177,38 @@ func (s *Service) FetchApprovedData(ctx context.Context, staffUserID, requestID 
 		return nil, err
 	}
 
+	// FR-BC-03 & FR-BC-04: Calculate real-time hash of patient data and verify
+	// against blockchain ledger before disclosing data to hospital staff.
+	currentHash := s.patients.ComputeHash(patientProfile)
+	if s.audit != nil {
+		valid, recordedHash, err := s.audit.VerifyProfileOnChain(ctx, req.PatientID, currentHash)
+		if err != nil {
+			log.Printf("[integrity] blockchain verify error (%v), falling back to local audit ledger", err)
+			latestHash, lerr := s.audit.GetLatestProfileHash(ctx, req.PatientID)
+			if lerr == nil && latestHash != "" {
+				valid = (latestHash == currentHash)
+				recordedHash = latestHash
+			}
+		}
+
+		if !valid && recordedHash != "" {
+			log.Printf("[SECURITY ALERT - FR-BC-04] Patient data integrity violation! PatientID=%s currentHash=%s recordedHash=%s",
+				req.PatientID, currentHash, recordedHash)
+			s.recordEvent(ctx, req.ID, "INTEGRITY_VIOLATION_BLOCKED", staffUserID, map[string]any{
+				"error":        "hash_mismatch",
+				"currentHash":  currentHash,
+				"recordedHash": recordedHash,
+			})
+			return nil, ErrDataTampered
+		}
+	}
+
 	view := patientProfile.FilteredView(req.Categories)
 
-	s.recordEvent(ctx, req.ID, actionAccessed, staffUserID, map[string]any{"categories": req.Categories})
+	s.recordEvent(ctx, req.ID, actionAccessed, staffUserID, map[string]any{
+		"categories": req.Categories,
+		"dataHash":   currentHash,
+	})
 
 	return view, nil
 }

@@ -1,0 +1,17 @@
+# Local documentation & agent files
+docs/
+docs_config.json
+sync_docs.js
+AGENTS.md
+*.pdf
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

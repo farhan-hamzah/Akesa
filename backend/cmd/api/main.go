@@ -11,6 +11,7 @@ import (
 
 	"github.com/farhan-hamzah/Akesa/backend/internal/access"
 	"github.com/farhan-hamzah/Akesa/backend/internal/audit"
+	"github.com/farhan-hamzah/Akesa/backend/internal/blockchain"
 	"github.com/farhan-hamzah/Akesa/backend/internal/config"
 	"github.com/farhan-hamzah/Akesa/backend/internal/crypto"
 	"github.com/farhan-hamzah/Akesa/backend/internal/database"
@@ -39,23 +40,26 @@ func main() {
 
 	fmt.Println("PostgreSQL connection successful")
 
-	// --- Wiring, one domain at a time. Each domain follows the same
-	// shape: repository (owns SQL) -> service (owns business rules,
-	// depends only on small interfaces of other domains) -> handler
-	// (owns HTTP). Adding a new domain means adding one block here and
-	// registering its routes in internal/server/server.go. ---
+	bcClient := blockchain.NewClient(blockchain.Config{
+		RPCURL:          cfg.BlockchainRPCURL,
+		ContractAddress: cfg.BlockchainContractAddress,
+		FromAddress:     cfg.BlockchainFromAddress,
+	})
+	if bcClient.IsEnabled() {
+		fmt.Printf("Blockchain layer connected: contract=%s rpc=%s\n", cfg.BlockchainContractAddress, cfg.BlockchainRPCURL)
+	} else {
+		fmt.Println("Blockchain layer: local cryptographic hash-chain active (on-chain anchoring disabled)")
+	}
 
 	fieldCipher, err := crypto.NewFieldCipher(cfg.FieldEncryptionKey)
 	if err != nil {
 		log.Fatalf("failed to initialize field encryption: %v", err)
 	}
-	// Two separate keyed hashers, two separate keys - a leak of one
-	// doesn't automatically compromise the other. See internal/crypto/hash.go.
 	nikHasher := crypto.NewKeyedHasher(cfg.NIKHashKey)
 	auditHasher := crypto.NewKeyedHasher(cfg.AuditHashKey)
 
 	auditRepository := audit.NewRepository(db)
-	auditService := audit.NewService(auditRepository)
+	auditService := audit.NewService(auditRepository, bcClient)
 	auditHandler := audit.NewHandler(auditService)
 
 	userRepository := user.NewRepository(db)

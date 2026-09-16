@@ -87,6 +87,11 @@ func (s *Service) recordHash(ctx context.Context, profile *Profile) error {
 	return s.audit.RecordProfileHash(ctx, profile.ID, s.hashProfile(profile))
 }
 
+// ComputeHash exposes the deterministic profile hash computation for integrity verification.
+func (s *Service) ComputeHash(p *Profile) string {
+	return s.hashProfile(p)
+}
+
 // hashProfile produces a deterministic, keyed content hash of the profile
 // so the audit chain can prove "this exact version of the data existed at
 // this time" without ever storing the personal data - or a

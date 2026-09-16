@@ -9,4 +9,5 @@ var (
 	ErrNotApproved     = errors.New("access request is not approved")
 	ErrPatientNotFound = errors.New("patient not found for the given patient code")
 	ErrEmptyPurpose    = errors.New("purpose is required")
+	ErrDataTampered    = errors.New("patient profile data integrity violation - hash mismatch")
 )

@@ -139,6 +139,96 @@ func (r *Repository) ListByEntity(ctx context.Context, entityType string, entity
 	return logs, rows.Err()
 }
 
+// VerifyChainIntegrity walks the entire audit chain in chronological order
+// from genesis to the current tip, re-computing each block's SHA-256 hash.
+// If any row has been altered, deleted, or inserted out of order, it returns
+// false and a detailed error identifying the corrupted entry.
+func (r *Repository) VerifyChainIntegrity(ctx context.Context) (bool, int, error) {
+	rows, err := r.db.Query(
+		ctx,
+		`SELECT id, entity_type, entity_id, action, actor_id, payload, prev_hash, hash, created_at
+		 FROM audit_logs
+		 ORDER BY created_at ASC`,
+	)
+	if err != nil {
+		return false, 0, fmt.Errorf("query audit logs: %w", err)
+	}
+	defer rows.Close()
+
+	expectedPrevHash := genesisHash
+	count := 0
+
+	for rows.Next() {
+		entry := &Log{}
+		if err := rows.Scan(
+			&entry.ID, &entry.EntityType, &entry.EntityID, &entry.Action, &entry.ActorID,
+			&entry.Payload, &entry.PrevHash, &entry.Hash, &entry.CreatedAt,
+		); err != nil {
+			return false, count, fmt.Errorf("scan audit log at index %d: %w", count, err)
+		}
+
+		if entry.PrevHash != expectedPrevHash {
+			return false, count, fmt.Errorf("chain broken at entry %s (index %d): expected prev_hash %s, got %s",
+				entry.ID, count, expectedPrevHash, entry.PrevHash)
+		}
+
+		computed := computeHash(
+			entry.PrevHash,
+			entry.EntityType,
+			entry.EntityID,
+			entry.Action,
+			entry.ActorID,
+			entry.Payload,
+			entry.CreatedAt,
+		)
+		if entry.Hash != computed {
+			return false, count, fmt.Errorf("tamper detected at entry %s (index %d): expected hash %s, got %s",
+				entry.ID, count, computed, entry.Hash)
+		}
+
+		expectedPrevHash = entry.Hash
+		count++
+	}
+
+	if err := rows.Err(); err != nil {
+		return false, count, fmt.Errorf("iterate audit logs: %w", err)
+	}
+
+	if count > 0 {
+		var lastHash string
+		err := r.db.QueryRow(ctx, `SELECT last_hash FROM audit_chain_state WHERE chain_name = $1`, chainName).Scan(&lastHash)
+		if err != nil {
+			return false, count, fmt.Errorf("query chain tip: %w", err)
+		}
+		if lastHash != expectedPrevHash {
+			return false, count, fmt.Errorf("chain tip mismatch: state has %s, computed chain ended at %s", lastHash, expectedPrevHash)
+		}
+	}
+
+	return true, count, nil
+}
+
+// GetLatestEntityLog returns the most recent audit log entry for a specific entity and action.
+func (r *Repository) GetLatestEntityLog(ctx context.Context, entityType string, entityID uuid.UUID, action string) (*Log, error) {
+	entry := &Log{}
+	err := r.db.QueryRow(
+		ctx,
+		`SELECT id, entity_type, entity_id, action, actor_id, payload, prev_hash, hash, created_at
+		 FROM audit_logs
+		 WHERE entity_type = $1 AND entity_id = $2 AND action = $3
+		 ORDER BY created_at DESC
+		 LIMIT 1`,
+		entityType, entityID, action,
+	).Scan(
+		&entry.ID, &entry.EntityType, &entry.EntityID, &entry.Action, &entry.ActorID,
+		&entry.Payload, &entry.PrevHash, &entry.Hash, &entry.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return entry, nil
+}
+
 func computeHash(
 	prevHash string,
 	entityType string,

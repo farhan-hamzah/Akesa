@@ -1,0 +1,16 @@
+{
+  "name": "akesa-contracts",
+  "version": "1.0.0",
+  "description": "Smart contracts for Akesa Permissioned Audit Ledger",
+  "main": "index.js",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "node": "hardhat node",
+    "deploy:local": "hardhat run scripts/deploy.js --network localhost"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.0"
+  }
+}
