@@ -442,18 +442,179 @@ curl -X POST http://localhost:8080/api/v1/admin/hospitals/<hospitalId>/staff \
   }'
 ```
 
-## 6. Contoh alur lengkap, dari nol sampe selesai
+### `GET /api/v1/patient/qr`
 
-1. Pasien sync + bikin profile → dapet `patientCode`.
-2. Petugas RS (yang udah dilink admin) ajuin access request pake
-   `patientCode` itu, sebutin `categories` yang dibutuhin.
-3. Pasien buka `GET /patient/access-requests`, nemu request-nya, approve.
-4. Petugas RS `GET /hospital/access-requests/{id}/data` - dapet data sesuai
-   kategori yang disetujui.
-5. Kapan pun pasien berubah pikiran, tinggal revoke, dan RS langsung gak
-   bisa ambil data lagi lewat request itu.
-6. Semua langkah di atas otomatis kecatet di audit trail, bisa diliat
-   pasien lewat `GET /patient/history`.
+Ambil QR credential milik pasien yang sedang login.
+
+Endpoint ini digunakan mobile app untuk menampilkan QR pasien kepada petugas
+rumah sakit saat proses pendaftaran.
+
+**Penting:** endpoint ini tidak memberikan izin kepada rumah sakit untuk
+langsung mengakses data pasien. QR hanya berfungsi sebagai credential untuk
+mengidentifikasi pasien. Akses data tetap mengikuti mekanisme
+`access-request` dan persetujuan pasien yang dijelaskan di atas.
+
+```bash
+curl http://localhost:8080/api/v1/patient/qr \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Response:
+
+```json
+{
+  "displayCode": "AKS-7F3A9C21",
+  "qrPayload": "AKESA-QR-...",
+  "isActive": true
+}
+```
+
+Field response:
+
+| Field         | Tipe      | Keterangan                                          |
+| ------------- | --------- | --------------------------------------------------- |
+| `displayCode` | `string`  | Kode yang dapat ditampilkan sebagai identifier QR   |
+| `qrPayload`   | `string`  | Payload yang digunakan untuk menghasilkan gambar QR |
+| `isActive`    | `boolean` | Menunjukkan apakah credential QR masih aktif        |
+
+Mobile app bertanggung jawab untuk mengubah `qrPayload` menjadi gambar QR dan
+menampilkannya kepada pasien.
+
+Untuk keamanan pada sisi mobile, QR sebaiknya hanya ditampilkan setelah user
+berhasil melakukan verifikasi keamanan perangkat seperti fingerprint, Face ID,
+PIN, pattern, atau password perangkat. Verifikasi ini dilakukan di aplikasi
+mobile, bukan oleh endpoint backend.
+
+#### `POST /api/v1/patient/qr/rotate`
+
+Membuat credential QR baru untuk pasien yang sedang login dan menonaktifkan
+credential QR sebelumnya.
+
+Endpoint ini digunakan ketika pasien ingin memperbarui QR, misalnya karena
+QR sebelumnya sudah pernah ditampilkan kepada pihak lain atau pasien ingin
+mengganti credential yang sedang digunakan.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/patient/qr/rotate \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Response:
+
+```json
+{
+  "displayCode": "AKS-8B4D1E52",
+  "qrPayload": "AKESA-QR-...",
+  "isActive": true
+}
+```
+
+Setelah rotasi berhasil, QR credential sebelumnya menjadi tidak aktif dan
+tidak boleh lagi dianggap sebagai credential QR pasien yang valid.
+
+**Catatan keamanan:**
+
+* QR tidak sama dengan izin akses data pasien.
+* Memiliki atau mengetahui QR tidak otomatis memberikan akses ke data medis.
+* Akses data tetap membutuhkan `access-request` dari rumah sakit dan
+  persetujuan pasien.
+* QR sebaiknya tidak ditampilkan kepada orang yang tidak berwenang.
+* `qrPayload` jangan dianggap sebagai data profil pasien dan jangan
+  memasukkan NIK, alamat, atau data medis secara langsung ke dalam payload.
+* Mobile app disarankan melakukan verifikasi keamanan perangkat sebelum
+  menampilkan QR.
+
+## 6. Contoh alur lengkap, dari nol sampai selesai
+
+1. Pasien login/daftar melalui Clerk, kemudian mobile app memanggil
+   `POST /api/v1/users/sync` untuk mendaftarkan user ke database backend.
+
+2. Pasien membuat profile melalui `POST /api/v1/patient/profile` dan
+   mendapatkan `patientCode`.
+
+3. Saat pasien akan melakukan pendaftaran di rumah sakit, mobile app dapat
+   mengambil QR credential melalui `GET /api/v1/patient/qr`.
+
+4. Sebelum QR ditampilkan, mobile app melakukan verifikasi keamanan perangkat
+   seperti fingerprint, Face ID, PIN, pattern, atau password.
+
+5. Setelah berhasil diverifikasi, pasien menunjukkan QR kepada petugas rumah
+   sakit saat proses pendaftaran.
+
+6. Petugas rumah sakit menggunakan informasi dari QR untuk mengidentifikasi
+   pasien, kemudian mengajukan access request melalui
+   `POST /api/v1/hospital/access-requests` dengan kategori data yang memang
+   dibutuhkan.
+
+7. Pasien melihat request tersebut melalui
+   `GET /api/v1/patient/access-requests`.
+
+8. Pasien dapat menyetujui atau menolak request melalui endpoint
+   `approve` atau `reject`.
+
+9. Jika disetujui, petugas rumah sakit dapat mengambil data pasien melalui
+   `GET /api/v1/hospital/access-requests/{id}/data`. Data yang diberikan
+   hanya kategori yang telah disetujui pasien.
+
+10. Jika pasien ingin menghentikan akses, pasien dapat menggunakan endpoint
+    `revoke`. Setelah itu rumah sakit tidak dapat lagi mengambil data melalui
+    request tersebut.
+
+11. Jika pasien ingin mengganti credential QR, mobile app dapat memanggil
+    `POST /api/v1/patient/qr/rotate`. Credential sebelumnya akan
+    dinonaktifkan.
+
+12. Semua aktivitas penting seperti perubahan profile, keputusan access
+    request, rotasi credential, dan akses data dicatat melalui audit trail
+    sesuai implementasi backend.
+
+### Ringkasnya
+
+```text
+Pasien Login
+     │
+     ▼
+POST /users/sync
+     │
+     ▼
+POST /patient/profile
+     │
+     ▼
+GET /patient/qr
+     │
+     ▼
+Verifikasi perangkat
+     │
+     ▼
+Tampilkan QR ke petugas RS
+     │
+     ▼
+Petugas identifikasi pasien
+     │
+     ▼
+POST /hospital/access-requests
+     │
+     ▼
+Pasien menerima request
+     │
+     ├───────────────┐
+     ▼               ▼
+  APPROVE          REJECT
+     │
+     ▼
+RS mengambil data
+     │
+     ▼
+Kategori data yang
+disetujui pasien saja
+     │
+     ▼
+Audit Trail
+```
+
+**Prinsip penting:** QR hanya membantu proses identifikasi pasien dan tidak
+menggantikan mekanisme permission. Kepemilikan QR tidak berarti rumah sakit
+otomatis memperoleh akses ke data pasien.
 
 ## 7. Hal-hal yang perlu diinget kalau kerja bareng
 
