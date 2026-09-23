@@ -20,7 +20,6 @@ func NewHandler(service *Service) *Handler {
 	}
 }
 
-// Me - GET /api/v1/me (auth required, no role check: any synced user)
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	clerkUserID, ok := auth.GetClerkUserID(r)
 	if !ok {
@@ -67,9 +66,6 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, currentUser)
 }
 
-// Sync - POST /api/v1/users/sync (auth required) - called once right
-// after a successful Clerk sign-in/sign-up to create our own user row.
-// Idempotent: if the row already exists, it is simply returned.
 func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
 	clerkUserID, ok := auth.GetClerkUserID(r)
 	if !ok {

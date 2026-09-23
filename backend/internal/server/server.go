@@ -9,28 +9,25 @@ import (
 	"github.com/farhan-hamzah/Akesa/backend/internal/hospital"
 	appmiddleware "github.com/farhan-hamzah/Akesa/backend/internal/middleware"
 	"github.com/farhan-hamzah/Akesa/backend/internal/patient"
+	"github.com/farhan-hamzah/Akesa/backend/internal/patientqr"
 	"github.com/farhan-hamzah/Akesa/backend/internal/user"
 )
 
-// Roles - keep string literals in one place so routing and the `user`
-// package's Role type can never silently drift apart.
 const (
 	RolePatient = "PATIENT"
 	RoleStaff   = "HOSPITAL_STAFF"
 	RoleAdmin   = "ADMIN"
 )
 
-// Dependencies holds every handler and the auth.UserLoader needed to wire
-// routes. Passing one struct instead of a long positional argument list
-// keeps main.go readable as more domains get added.
 type Dependencies struct {
-	UserLoader auth.UserLoader // typically *user.Service
+	UserLoader auth.UserLoader
 
-	UserHandler     *user.Handler
-	PatientHandler  *patient.Handler
-	HospitalHandler *hospital.Handler
-	AccessHandler   *access.Handler
-	AuditHandler    *audit.Handler
+	UserHandler      *user.Handler
+	PatientHandler   *patient.Handler
+	HospitalHandler  *hospital.Handler
+	AccessHandler    *access.Handler
+	AuditHandler     *audit.Handler
+	PatientQRHandler *patientqr.Handler
 }
 
 type Server struct {
@@ -46,8 +43,6 @@ func New(deps Dependencies) *Server {
 	return server
 }
 
-// Handler returns the fully wrapped root handler (recovery + logging on
-// top of routing) - this is what main.go passes to http.ListenAndServe.
 func (s *Server) Handler() http.Handler {
 	return appmiddleware.Chain(
 		appmiddleware.Recover,
@@ -60,17 +55,13 @@ func (s *Server) registerRoutes(deps Dependencies) {
 	s.mux.HandleFunc("GET /health", healthHandler)
 	s.mux.HandleFunc("GET /api/v1/audit/verify-chain", deps.AuditHandler.VerifyChain)
 
-	// --- Account bootstrap: any authenticated Clerk principal, no role
-	// check yet (role doesn't exist in our DB until /sync runs once). ---
 	s.mux.Handle("POST /api/v1/users/sync", auth.RequireAuth(http.HandlerFunc(deps.UserHandler.Sync)))
 	s.mux.Handle("GET /api/v1/me", auth.RequireAuth(http.HandlerFunc(deps.UserHandler.Me)))
 
-	// Shared "browse active hospitals" - any synced, active account.
 	s.mux.Handle("GET /api/v1/hospitals",
 		s.chain(deps, http.HandlerFunc(deps.HospitalHandler.ListActive)),
 	)
 
-	// --- Patient routes ---
 	s.mux.Handle("GET /api/v1/patient/profile",
 		s.chain(deps, http.HandlerFunc(deps.PatientHandler.GetMyProfile), RolePatient),
 	)
@@ -96,7 +87,6 @@ func (s *Server) registerRoutes(deps Dependencies) {
 		s.chain(deps, http.HandlerFunc(deps.AuditHandler.MyProfileHistory), RolePatient),
 	)
 
-	// --- Hospital staff routes ---
 	s.mux.Handle("POST /api/v1/hospital/access-requests",
 		s.chain(deps, http.HandlerFunc(deps.AccessHandler.Create), RoleStaff),
 	)
@@ -107,7 +97,6 @@ func (s *Server) registerRoutes(deps Dependencies) {
 		s.chain(deps, http.HandlerFunc(deps.AccessHandler.FetchData), RoleStaff),
 	)
 
-	// --- Admin routes ---
 	s.mux.Handle("POST /api/v1/admin/hospitals",
 		s.chain(deps, http.HandlerFunc(deps.HospitalHandler.Create), RoleAdmin),
 	)
@@ -126,12 +115,14 @@ func (s *Server) registerRoutes(deps Dependencies) {
 	s.mux.Handle("POST /api/v1/admin/hospitals/{id}/staff",
 		s.chain(deps, http.HandlerFunc(deps.HospitalHandler.AddStaff), RoleAdmin),
 	)
+	s.mux.Handle("GET /api/v1/patient/qr",
+		s.chain(deps, http.HandlerFunc(deps.PatientQRHandler.Get), RolePatient),
+	)
+	s.mux.Handle("POST /api/v1/patient/qr/rotate",
+		s.chain(deps, http.HandlerFunc(deps.PatientQRHandler.Rotate), RolePatient),
+	)
 }
 
-// chain wraps a handler with RequireAuth -> WithUser -> (optionally)
-// RequireRole, so every protected route is built the same, predictable
-// way. Pass no roles to require only "authenticated + synced", any roles
-// to restrict further.
 func (s *Server) chain(deps Dependencies, final http.Handler, roles ...string) http.Handler {
 	mws := []appmiddleware.Middleware{
 		auth.RequireAuth,

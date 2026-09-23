@@ -10,20 +10,16 @@ import (
 	"github.com/google/uuid"
 )
 
-// PatientLookup is the slice of patient.Service this package depends on.
 type PatientLookup interface {
 	GetByPatientCode(ctx context.Context, patientCode string) (*patient.Profile, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*patient.Profile, error)
 	ComputeHash(profile *patient.Profile) string
 }
 
-// StaffLookup is the slice of hospital.Service this package depends on, to
-// resolve which hospital a calling staff member belongs to.
 type StaffLookup interface {
 	GetStaffByUserID(ctx context.Context, userID uuid.UUID) (*hospital.Staff, error)
 }
 
-// AuditRecorder is the slice of audit.Service this package depends on.
 type AuditRecorder interface {
 	RecordAccessEvent(ctx context.Context, entityType string, entityID uuid.UUID, action string, actorID uuid.UUID, payload map[string]any) error
 	VerifyProfileOnChain(ctx context.Context, patientID uuid.UUID, currentHash string) (bool, string, error)
@@ -32,9 +28,6 @@ type AuditRecorder interface {
 
 const entityTypeAccessRequest = "ACCESS_REQUEST"
 
-// Audit action name literals mirrored from the audit package to avoid a
-// hard dependency on it - see audit.Action* constants for the canonical
-// definitions used when writing the chain.
 const (
 	actionRequested = "ACCESS_REQUESTED"
 	actionApproved  = "ACCESS_APPROVED"
@@ -54,10 +47,6 @@ func NewService(repository *Repository, patients PatientLookup, staff StaffLooku
 	return &Service{repository: repository, patients: patients, staff: staff, audit: audit}
 }
 
-// CreateRequest - a hospital staff member requests access to a patient's
-// data. The staff's own hospital (never a client-supplied hospital id) is
-// used, so a staff member can never request access on behalf of another
-// hospital.
 func (s *Service) CreateRequest(ctx context.Context, staffUserID uuid.UUID, in CreateRequestInput) (*Request, error) {
 	staff, err := s.staff.GetStaffByUserID(ctx, staffUserID)
 	if err != nil {
@@ -97,7 +86,6 @@ func (s *Service) ListForHospitalStaff(ctx context.Context, staffUserID uuid.UUI
 	return s.repository.ListByHospital(ctx, staff.HospitalID)
 }
 
-// Approve - only the owning patient may approve their own request.
 func (s *Service) Approve(ctx context.Context, patientID, requestID uuid.UUID) (*Request, error) {
 	req, err := s.ownedPendingRequest(ctx, patientID, requestID)
 	if err != nil {
@@ -128,8 +116,6 @@ func (s *Service) Reject(ctx context.Context, patientID, requestID uuid.UUID) (*
 	return updated, nil
 }
 
-// Revoke - a patient can revoke access they previously approved, at any
-// time. This is the "mencabut akses" right from the SRS.
 func (s *Service) Revoke(ctx context.Context, patientID, requestID uuid.UUID) (*Request, error) {
 	req, err := s.repository.FindByID(ctx, requestID)
 	if err != nil {
@@ -151,10 +137,6 @@ func (s *Service) Revoke(ctx context.Context, patientID, requestID uuid.UUID) (*
 	return updated, nil
 }
 
-// FetchApprovedData is what a hospital staff member calls to read the
-// patient data they've been granted - it re-checks, on every call, that
-// the request belongs to the caller's hospital and is currently approved,
-// and it logs a DATA_ACCESSED audit event every time data is read.
 func (s *Service) FetchApprovedData(ctx context.Context, staffUserID, requestID uuid.UUID) (map[string]any, error) {
 	staff, err := s.staff.GetStaffByUserID(ctx, staffUserID)
 	if err != nil {
@@ -177,8 +159,6 @@ func (s *Service) FetchApprovedData(ctx context.Context, staffUserID, requestID 
 		return nil, err
 	}
 
-	// FR-BC-03 & FR-BC-04: Calculate real-time hash of patient data and verify
-	// against blockchain ledger before disclosing data to hospital staff.
 	currentHash := s.patients.ComputeHash(patientProfile)
 	if s.audit != nil {
 		valid, recordedHash, err := s.audit.VerifyProfileOnChain(ctx, req.PatientID, currentHash)
@@ -231,10 +211,6 @@ func (s *Service) recordEvent(ctx context.Context, requestID uuid.UUID, action s
 	if s.audit == nil {
 		return
 	}
-	// An audit logging failure must never block or roll back a decision
-	// the patient/staff already made - the underlying write already
-	// committed. In production this should also push to a metric/alert,
-	// not just a log line.
 	if err := s.audit.RecordAccessEvent(ctx, entityTypeAccessRequest, requestID, action, actorID, payload); err != nil {
 		log.Printf("audit: failed to record %s for access_request=%s: %v", action, requestID, err)
 	}

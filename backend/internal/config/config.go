@@ -14,24 +14,12 @@ type Config struct {
 	DatabaseURL    string
 	ClerkSecretKey string
 
-	// FieldEncryptionKey is the AES-256 key used to encrypt sensitive
-	// fields (NIK, insurance number) at rest. Must be exactly 32 bytes
-	// once base64-decoded. Generate one with: openssl rand -base64 32
 	FieldEncryptionKey []byte
 
-	// NIKHashKey is the HMAC key used for the deterministic, one-way NIK
-	// lookup hash stored alongside the encrypted NIK - it's what lets us
-	// enforce "one NIK, one profile" and search by NIK without ever
-	// decrypting every row. Deliberately a different key from
-	// FieldEncryptionKey and AuditHashKey (key separation).
 	NIKHashKey []byte
 
-	// AuditHashKey is the HMAC key used to compute the profile content
-	// hash that gets written into the audit hash chain. Also
-	// deliberately separate from the other two keys.
 	AuditHashKey []byte
 
-	// Blockchain layer configuration (optional; falls back to local cryptographic ledger if empty)
 	BlockchainRPCURL          string
 	BlockchainContractAddress string
 	BlockchainFromAddress     string
@@ -87,9 +75,6 @@ func Load() (*Config, error) {
 	return config, nil
 }
 
-// decodeBase64Key reads a base64-encoded env var and requires it to
-// decode to exactly wantBytes bytes - used for the AES-256 encryption key,
-// which (unlike an HMAC key) has a hard length requirement.
 func decodeBase64Key(envVar string, wantBytes int) ([]byte, error) {
 	raw := os.Getenv(envVar)
 	if raw == "" {
@@ -108,9 +93,6 @@ func decodeBase64Key(envVar string, wantBytes int) ([]byte, error) {
 	return decoded, nil
 }
 
-// requireSecret reads a plain-string secret env var (used as an HMAC key,
-// which has no fixed length requirement) and rejects it if it's missing or
-// suspiciously short - a short key defeats the point of keyed hashing.
 func requireSecret(envVar string) ([]byte, error) {
 	raw := os.Getenv(envVar)
 	if len(raw) < 16 {

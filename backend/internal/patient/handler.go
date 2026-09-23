@@ -17,7 +17,6 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-// GetMyProfile - GET /api/v1/patient/profile (role: PATIENT)
 func (h *Handler) GetMyProfile(w http.ResponseWriter, r *http.Request) {
 	authUser, ok := auth.GetAuthUser(r)
 	if !ok {
@@ -34,7 +33,6 @@ func (h *Handler) GetMyProfile(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, profile)
 }
 
-// CreateProfile - POST /api/v1/patient/profile (role: PATIENT)
 func (h *Handler) CreateProfile(w http.ResponseWriter, r *http.Request) {
 	authUser, ok := auth.GetAuthUser(r)
 	if !ok {
@@ -63,7 +61,6 @@ func (h *Handler) CreateProfile(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusCreated, profile)
 }
 
-// UpdateProfile - PUT /api/v1/patient/profile (role: PATIENT)
 func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	authUser, ok := auth.GetAuthUser(r)
 	if !ok {

@@ -7,10 +7,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// UserRoleUpdater is the slice of user.Service this package depends on -
-// promoting a synced account to HOSPITAL_STAFF once an admin links it to
-// a hospital. Defined on the consumer side to avoid a hospital<->user
-// import cycle.
 type UserRoleUpdater interface {
 	UpdateRole(ctx context.Context, userID uuid.UUID, role string) error
 }
@@ -48,9 +44,6 @@ func (s *Service) Deactivate(ctx context.Context, id uuid.UUID) (*Hospital, erro
 	return s.repository.UpdateStatus(ctx, id, StatusInactive)
 }
 
-// AddStaff links an already-Clerk-authenticated user to a hospital and
-// promotes their role to HOSPITAL_STAFF. The user must have already
-// called /api/v1/users/sync at least once so the userID exists.
 func (s *Service) AddStaff(ctx context.Context, hospitalID, userID uuid.UUID, fullName, position string) (*Staff, error) {
 	hospital, err := s.repository.FindByID(ctx, hospitalID)
 	if err != nil {

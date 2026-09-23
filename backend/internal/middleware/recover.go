@@ -5,9 +5,6 @@ import (
 	"net/http"
 )
 
-// Recover catches panics from downstream handlers, logs them, and returns
-// a generic 500 instead of letting the process crash or leaking a stack
-// trace to the client.
 func Recover(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {

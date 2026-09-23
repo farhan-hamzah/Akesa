@@ -17,6 +17,7 @@ import (
 	"github.com/farhan-hamzah/Akesa/backend/internal/database"
 	"github.com/farhan-hamzah/Akesa/backend/internal/hospital"
 	"github.com/farhan-hamzah/Akesa/backend/internal/patient"
+	"github.com/farhan-hamzah/Akesa/backend/internal/patientqr"
 	"github.com/farhan-hamzah/Akesa/backend/internal/server"
 	"github.com/farhan-hamzah/Akesa/backend/internal/user"
 )
@@ -70,6 +71,10 @@ func main() {
 	patientService := patient.NewService(patientRepository, auditService, auditHasher)
 	patientHandler := patient.NewHandler(patientService)
 
+	patientQRRepository := patientqr.NewRepository(db)
+	patientQRService := patientqr.NewService(patientQRRepository)
+	patientQRHandler := patientqr.NewHandler(patientQRService)
+
 	hospitalRepository := hospital.NewRepository(db)
 	hospitalService := hospital.NewService(hospitalRepository, userService)
 	hospitalHandler := hospital.NewHandler(hospitalService)
@@ -79,12 +84,13 @@ func main() {
 	accessHandler := access.NewHandler(accessService)
 
 	appServer := server.New(server.Dependencies{
-		UserLoader:      userService,
-		UserHandler:     userHandler,
-		PatientHandler:  patientHandler,
-		HospitalHandler: hospitalHandler,
-		AccessHandler:   accessHandler,
-		AuditHandler:    auditHandler,
+		UserLoader:       userService,
+		UserHandler:      userHandler,
+		PatientHandler:   patientHandler,
+		HospitalHandler:  hospitalHandler,
+		AccessHandler:    accessHandler,
+		AuditHandler:     auditHandler,
+		PatientQRHandler: patientQRHandler,
 	})
 
 	addr := ":" + cfg.Port

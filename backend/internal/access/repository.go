@@ -87,10 +87,6 @@ func (r *Repository) ListByHospital(ctx context.Context, hospitalID uuid.UUID) (
 	return scanRequestRows(rows)
 }
 
-// UpdateStatus performs an atomic, guarded transition: it only succeeds if
-// the row's current status matches expectedCurrent, which prevents a
-// double-approve / double-revoke race between two concurrent requests for
-// the same access request.
 func (r *Repository) UpdateStatus(ctx context.Context, id uuid.UUID, expectedCurrent, next Status) (*Request, error) {
 	var decidedAt *time.Time
 	if next == StatusApproved || next == StatusRejected {
@@ -107,8 +103,6 @@ func (r *Repository) UpdateStatus(ctx context.Context, id uuid.UUID, expectedCur
 
 	req, err := scanRequest(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		// Either the id doesn't exist at all, or it exists but wasn't in
-		// the expected state - distinguish the two for a clearer error.
 		if _, findErr := r.FindByID(ctx, id); errors.Is(findErr, ErrRequestNotFound) {
 			return nil, ErrRequestNotFound
 		}

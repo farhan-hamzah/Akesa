@@ -4,10 +4,6 @@ import (
 	"net/http"
 )
 
-// RequireRole restricts access to callers whose AuthUser.Role is one of the
-// given roles. It MUST run after RequireAuth and WithUser in the middleware
-// chain, since it reads the AuthUser placed on the context by WithUser -
-// it never trusts a role that hasn't been loaded from our own database.
 func RequireRole(roles ...string) func(http.Handler) http.Handler {
 	allowed := make(map[string]struct{}, len(roles))
 	for _, role := range roles {

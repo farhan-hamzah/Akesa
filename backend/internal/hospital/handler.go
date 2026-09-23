@@ -18,7 +18,6 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-// Create - POST /api/v1/admin/hospitals (role: ADMIN)
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var req HospitalRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -41,9 +40,6 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusCreated, hospitalRecord)
 }
 
-// List - GET /api/v1/admin/hospitals (role: ADMIN)
-// Also used to power the patient-facing "daftar rumah sakit" list, but
-// that route should filter to ACTIVE only - see server routing.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	hospitals, err := h.service.List(r.Context())
 	if err != nil {
@@ -54,9 +50,6 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, hospitals)
 }
 
-// ListActive - GET /api/v1/hospitals (role: PATIENT, HOSPITAL_STAFF) -
-// public-ish read of only active hospitals, so a patient can pick where
-// to register.
 func (h *Handler) ListActive(w http.ResponseWriter, r *http.Request) {
 	hospitals, err := h.service.List(r.Context())
 	if err != nil {
@@ -74,24 +67,18 @@ func (h *Handler) ListActive(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, active)
 }
 
-// Verify - PATCH /api/v1/admin/hospitals/{id}/verify (role: ADMIN)
 func (h *Handler) Verify(w http.ResponseWriter, r *http.Request) {
 	h.transition(w, r, h.service.Verify)
 }
 
-// Activate - PATCH /api/v1/admin/hospitals/{id}/activate (role: ADMIN)
 func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
 	h.transition(w, r, h.service.Activate)
 }
 
-// Deactivate - PATCH /api/v1/admin/hospitals/{id}/deactivate (role: ADMIN)
 func (h *Handler) Deactivate(w http.ResponseWriter, r *http.Request) {
 	h.transition(w, r, h.service.Deactivate)
 }
 
-// transition is the shared body for the three status-change endpoints
-// above, which all take a hospital id from the path and return the
-// updated record.
 func (h *Handler) transition(
 	w http.ResponseWriter,
 	r *http.Request,

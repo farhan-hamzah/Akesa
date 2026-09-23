@@ -16,15 +16,10 @@ import (
 
 const uniqueViolationCode = "23505"
 
-// Repository is the ONLY place NIK and insurance number ever exist as
-// ciphertext-on-the-wire-to-Postgres vs plaintext-in-Go-memory. Every
-// method here decrypts on the way out and encrypts on the way in, so
-// every other layer (service, handler) just works with plain Go strings
-// and never has to think about encryption.
 type Repository struct {
 	db        *pgxpool.Pool
-	cipher    *crypto.FieldCipher // reversible - lets us show the real NIK to someone authorized
-	nikHasher *crypto.KeyedHasher // one-way - lets us enforce "one NIK, one profile" without ever decrypting
+	cipher    *crypto.FieldCipher
+	nikHasher *crypto.KeyedHasher
 }
 
 func NewRepository(db *pgxpool.Pool, cipher *crypto.FieldCipher, nikHasher *crypto.KeyedHasher) *Repository {
@@ -61,11 +56,6 @@ func (r *Repository) FindByID(ctx context.Context, id uuid.UUID) (*Profile, erro
 	)
 }
 
-// Create inserts a new profile. NIK and insurance number are encrypted
-// before they ever reach the query, and a deterministic HMAC of the NIK
-// (nik_hash) is stored alongside so the database can still enforce
-// uniqueness and support exact-match lookup without ever holding a
-// reversible plaintext copy itself.
 func (r *Repository) Create(ctx context.Context, userID uuid.UUID, in ProfileInput) (*Profile, error) {
 	encryptedNIK, err := r.cipher.Encrypt(in.NIK)
 	if err != nil {
@@ -166,9 +156,6 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-// scanRow reads one row into a Profile and decrypts nik/insurance_number
-// in the same step - so every caller in this file gets plaintext back,
-// never ciphertext.
 func (r *Repository) scanRow(row rowScanner) (*Profile, error) {
 	profile := &Profile{}
 	var encryptedNIK string
@@ -217,10 +204,6 @@ func (r *Repository) scanOne(ctx context.Context, query string, args ...any) (*P
 	return profile, nil
 }
 
-// generatePatientCode produces a short, human-readable code like
-// "AKS-4F2A9C1D" that hospital staff can type in manually if needed. This
-// is intentionally NOT derived from the NIK - it must never leak identity
-// information on its own.
 func generatePatientCode() (string, error) {
 	buf := make([]byte, 4)
 	if _, err := rand.Read(buf); err != nil {

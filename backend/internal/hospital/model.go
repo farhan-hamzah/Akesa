@@ -9,8 +9,8 @@ import (
 type Status string
 
 const (
-	StatusPending  Status = "PENDING"  // registered, not yet verified by admin
-	StatusVerified Status = "VERIFIED" // verified but not yet active
+	StatusPending  Status = "PENDING"
+	StatusVerified Status = "VERIFIED"
 	StatusActive   Status = "ACTIVE"
 	StatusInactive Status = "INACTIVE"
 )
@@ -27,9 +27,6 @@ type Hospital struct {
 	UpdatedAt          time.Time `json:"updatedAt"`
 }
 
-// Staff links a `user` (role HOSPITAL_STAFF) account to a specific
-// hospital, so a staff member's access requests can be attributed to
-// their hospital.
 type Staff struct {
 	ID         uuid.UUID `json:"id"`
 	UserID     uuid.UUID `json:"userId"`

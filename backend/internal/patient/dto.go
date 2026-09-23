@@ -5,8 +5,6 @@ import (
 	"time"
 )
 
-// ProfileInput is the validated shape used for both create and update -
-// keeping one struct for both avoids drift between the two code paths.
 type ProfileInput struct {
 	FullName              string
 	NIK                   string
@@ -20,11 +18,10 @@ type ProfileInput struct {
 	EmergencyContactPhone *string
 }
 
-// ProfileRequest is the raw wire format accepted from the mobile app.
 type ProfileRequest struct {
 	FullName              string  `json:"fullName"`
 	NIK                   string  `json:"nik"`
-	DateOfBirth           string  `json:"dateOfBirth"` // "YYYY-MM-DD"
+	DateOfBirth           string  `json:"dateOfBirth"`
 	Gender                string  `json:"gender"`
 	PhoneNumber           string  `json:"phoneNumber"`
 	Address               string  `json:"address"`
@@ -34,9 +31,6 @@ type ProfileRequest struct {
 	EmergencyContactPhone *string `json:"emergencyContactPhone,omitempty"`
 }
 
-// Validate parses and sanity-checks the request, returning a ProfileInput
-// ready for the service layer. Keeping validation here (not in the
-// handler) means it's unit-testable without spinning up an http.Request.
 func (req ProfileRequest) Validate() (ProfileInput, error) {
 	fullName := strings.TrimSpace(req.FullName)
 	nik := strings.TrimSpace(req.NIK)

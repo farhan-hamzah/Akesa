@@ -14,13 +14,10 @@ const (
 	GenderFemale Gender = "FEMALE"
 )
 
-// Profile is the reusable "isi data satu kali" record: everything a
-// patient would otherwise retype at every hospital. It intentionally
-// excludes full medical records (rekam medis) - out of scope per SRS.
 type Profile struct {
 	ID                    uuid.UUID `json:"id"`
 	UserID                uuid.UUID `json:"userId"`
-	PatientCode           string    `json:"patientCode"` // short unique code hospital staff search by
+	PatientCode           string    `json:"patientCode"`
 	FullName              string    `json:"fullName"`
 	NIK                   string    `json:"nik"`
 	DateOfBirth           time.Time `json:"dateOfBirth"`
@@ -35,10 +32,6 @@ type Profile struct {
 	UpdatedAt             time.Time `json:"updatedAt"`
 }
 
-// FilteredView returns only the fields that fall under the given approved
-// categories - this is what a hospital is allowed to see, and is the
-// concrete enforcement of "rumah sakit hanya dapat melihat kategori data
-// yang telah disetujui oleh pasien".
 func (p *Profile) FilteredView(categories []datacategory.Category) map[string]any {
 	view := map[string]any{
 		"patientCode": p.PatientCode,

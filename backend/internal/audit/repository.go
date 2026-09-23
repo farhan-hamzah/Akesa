@@ -11,11 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// genesisHash is the prevHash used for the very first entry in the chain.
 const genesisHash = "0000000000000000000000000000000000000000000000000000000000000"
 
-// chainName is a single global chain for the prototype. If per-patient
-// chains are ever needed, this can become a parameter.
 const chainName = "global"
 
 type Repository struct {
@@ -26,10 +23,6 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
 }
 
-// InsertWithChain appends a new entry to the hash chain inside a
-// transaction: it locks the current chain tip (SELECT ... FOR UPDATE),
-// computes the new entry's hash on top of it, inserts the entry, and
-// advances the tip - so concurrent writers can never fork the chain.
 func (r *Repository) InsertWithChain(
 	ctx context.Context,
 	entityType string,
@@ -42,7 +35,7 @@ func (r *Repository) InsertWithChain(
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck // no-op if committed
+	defer tx.Rollback(ctx)
 
 	var prevHash string
 	err = tx.QueryRow(
@@ -52,7 +45,6 @@ func (r *Repository) InsertWithChain(
 	).Scan(&prevHash)
 
 	if err != nil {
-		// First-ever entry: seed the chain state row.
 		prevHash = genesisHash
 		if _, insertErr := tx.Exec(
 			ctx,
@@ -107,9 +99,6 @@ func (r *Repository) InsertWithChain(
 	return entry, nil
 }
 
-// ListByEntity returns the audit trail for a single entity (e.g. one
-// patient's profile, or one access request), oldest first, so a patient
-// can review "riwayat penggunaan data" (SRS).
 func (r *Repository) ListByEntity(ctx context.Context, entityType string, entityID uuid.UUID) ([]*Log, error) {
 	rows, err := r.db.Query(
 		ctx,
@@ -139,10 +128,6 @@ func (r *Repository) ListByEntity(ctx context.Context, entityType string, entity
 	return logs, rows.Err()
 }
 
-// VerifyChainIntegrity walks the entire audit chain in chronological order
-// from genesis to the current tip, re-computing each block's SHA-256 hash.
-// If any row has been altered, deleted, or inserted out of order, it returns
-// false and a detailed error identifying the corrupted entry.
 func (r *Repository) VerifyChainIntegrity(ctx context.Context) (bool, int, error) {
 	rows, err := r.db.Query(
 		ctx,
@@ -207,8 +192,6 @@ func (r *Repository) VerifyChainIntegrity(ctx context.Context) (bool, int, error
 
 	return true, count, nil
 }
-
-// GetLatestEntityLog returns the most recent audit log entry for a specific entity and action.
 func (r *Repository) GetLatestEntityLog(ctx context.Context, entityType string, entityID uuid.UUID, action string) (*Log, error) {
 	entry := &Log{}
 	err := r.db.QueryRow(
