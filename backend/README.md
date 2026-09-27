@@ -1,270 +1,806 @@
 # Akesa Backend
 
-Ini backend-nya Akesa - aplikasi pendaftaran pasien antar-rumah sakit, dengan
-audit trail berbasis hash chain (proof of concept "blockchain"-nya). Dibangun
-pakai Go 1.25, PostgreSQL, dan Clerk buat autentikasi.
+Backend untuk **Akesa**, aplikasi pendaftaran pasien antar-rumah sakit yang memungkinkan pasien menyimpan data secara terpusat dan memberikan atau mencabut izin akses data kepada rumah sakit.
 
-Dokumen ini isinya cara jalanin project-nya di lokal, gimana struktur kodenya
-disusun, dan contoh pakai tiap endpoint biar kalau mau tes atau connect dari
-Flutter gak perlu nebak-nebak.
+Backend ini dibangun menggunakan:
 
-## 1. Cara jalanin di lokal
+* **Go 1.25**
+* **PostgreSQL 17**
+* **Clerk** untuk autentikasi
+* **AES-256-GCM** untuk enkripsi field sensitif
+* **HMAC-SHA256** untuk hash yang digunakan pada audit trail
+* **Hash chain** sebagai lapisan audit trail
+* **EVM/Solidity** sebagai bagian dari hybrid blockchain architecture
+* **Docker** untuk environment PostgreSQL lokal
+
+Fokus utama backend:
+
+1. Authentication & authorization
+2. Patient profile
+3. Identity / KTP verification
+4. Hospital management
+5. Access request & consent
+6. Patient QR credential
+7. Audit trail & integrity verification
+8. Hybrid blockchain proof of concept
+9. Encryption untuk data sensitif
+
+---
+
+# 1. Cara Menjalankan di Lokal
+
+## 1.1. Environment
+
+Buat file `.env` dari template:
 
 ```bash
-cp .env.example .env          # isi CLERK_SECRET_KEY dari dashboard Clerk kamu
+cp .env.example .env
 ```
 
-Sebelum lanjut, generate 3 key buat lapisan enkripsi NIK (dijelasin lebih
-detail di section 4.5 di bawah), terus tempel hasilnya ke `.env`:
+Kemudian isi konfigurasi yang diperlukan, terutama:
+
+```env
+CLERK_SECRET_KEY=...
+
+DATABASE_URL=postgres://akesa:akesa@localhost:5432/akesa?sslmode=disable
+PORT=8080
+```
+
+Untuk fitur enkripsi dan audit hash, generate key berikut:
 
 ```bash
-openssl rand -base64 32   # buat FIELD_ENCRYPTION_KEY
-openssl rand -hex 32      # buat NIK_HASH_KEY
-openssl rand -hex 32      # buat AUDIT_HASH_KEY (jangan sama dengan yang di atas!)
+openssl rand -base64 32
 ```
 
-Baru lanjut:
+Gunakan hasilnya sebagai:
+
+```env
+FIELD_ENCRYPTION_KEY=...
+```
+
+Kemudian:
 
 ```bash
-docker compose up -d          # nyalain Postgres lokal (atau `make db-up` kalau punya make)
-make migrate-up               # jalanin semua migrasi (butuh CLI golang-migrate)
-make run                      # jalanin API di :8080
+openssl rand -hex 32
 ```
 
-Kalau belum punya `golang-migrate`, install sekali aja:
+Gunakan hasil pertama sebagai:
+
+```env
+NIK_HASH_KEY=...
+```
+
+Generate satu key lagi:
+
+```bash
+openssl rand -hex 32
+```
+
+Gunakan hasil kedua sebagai:
+
+```env
+AUDIT_HASH_KEY=...
+```
+
+**Jangan menggunakan key yang sama untuk ketiga konfigurasi tersebut.**
+
+---
+
+## 1.2. Jalankan PostgreSQL
+
+Jika menggunakan Docker:
+
+```bash
+docker compose up -d
+```
+
+Cek:
+
+```bash
+docker compose ps
+```
+
+Pastikan container PostgreSQL sudah `Up`.
+
+---
+
+## 1.3. Jalankan Migration
+
+Pastikan `golang-migrate` sudah terinstall.
+
+Jika belum:
 
 ```bash
 go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 ```
 
-Terus cek API-nya udah hidup atau belum:
+Kemudian:
 
 ```bash
-curl http://localhost:8080/health
-# {"status":"ok"}
+make migrate-up
 ```
 
-Kalau muncul itu, berarti udah beres. Lanjut baca bagian bawah buat paham
-struktur kodenya sebelum mulai ngoprek.
+Atau jalankan migration sesuai konfigurasi lokal.
 
-## 2. Struktur kode
+Migration saat ini mencakup:
 
-Tiap domain (`user`, `patient`, `hospital`, `access`, `audit`) bentuknya sama
-persis, ada di `internal/<domain>/`:
-
-| File            | Isinya apa                                                  |
-|------------------|--------------------------------------------------------------|
-| `model.go`      | struct domain-nya (bukan struct database, bukan struct JSON) |
-| `errors.go`     | error yang udah didefinisiin (`var ErrX = errors.New(...)`)  |
-| `repository.go` | tempat satu-satunya yang boleh nulis query SQL               |
-| `dto.go`        | bentuk request JSON + validasi input                         |
-| `service.go`    | logic bisnisnya, gak tau soal HTTP sama sekali             |
-| `handler.go`    | urusan HTTP: baca JSON, panggil service, balikin response    |
-
-Alurnya selalu satu arah, gak boleh lompat-lompat:
-
-```
-handler -> service -> repository -> Postgres
-```
-
-`cmd/api/main.go` itu satu-satunya tempat yang nyambungin semua layer ini
-jadi satu. Jadi kalau mau nambah domain baru, yang perlu disentuh cuma: bikin
-folder baru di `internal/<domain_baru>/`, tambahin satu blok wiring di
-`main.go`, terus daftarin route-nya di `internal/server/server.go`. Udah,
-gak perlu ubah-ubah domain lain.
-
-### Kenapa banyak banget `interface` kecil-kecil?
-
-Contohnya nih, package `patient` itu **gak** import package `audit` sama
-sekali. Tapi di `patient/service.go` ada begini:
-
-```go
-type AuditRecorder interface {
-    RecordProfileHash(ctx context.Context, patientID uuid.UUID, profileHash string) error
-}
-```
-
-Kebetulan `audit.Service` punya method dengan tanda tangan yang sama persis,
-jadi dia otomatis "cocok" sama interface itu tanpa `patient` perlu tau
-package `audit` itu ada. Enaknya:
-
-- gak bakal ada import cycle antar domain (bikin pusing kalau kejadian).
-- Gampang di-unit-test - tinggal bikin mock kecil buat interface-nya, gak
-  perlu nyalain Postgres beneran.
-- Kalau suatu saat `audit` mau diganti pake blockchain sungguhan (misal
-  Hyperledger), `patient` sama `access` gak perlu diapa-apain.
-
-Kalau bingung liat pola ini di tempat lain, itu memang sengaja, bukan salah
-ketik.
-
-## 3. Auth & Role - WAJIB DIBACA sebelum nambah endpoint
-
-- **Autentikasi** ditangani Clerk sepenuhnya. Mobile app kirim JWT Clerk di
-  header `Authorization: Bearer <token>`, terus middleware
-  `auth.RequireAuth` yang validasi.
-- Tapi habis lolos autentikasi Clerk, itu **belum tentu** kita tau role-nya
-  apa di sistem kita (`PATIENT` / `HOSPITAL_STAFF` / `ADMIN`). Role itu cuma
-  ada di tabel `users` kita sendiri, bukan di token Clerk.
-- **`auth.WithUser(userService)`** yang nyari baris di tabel `users`
-  berdasarkan Clerk user id, terus nyimpen `{id, role, status}`-nya sebagai
-  `AuthUser` di context request.
-- **`auth.RequireRole("ADMIN")`** baca `AuthUser` itu dari context, kalau
-  role-nya gak cocok ya di-reject (403).
-
-Urutan middleware-nya **harus** selalu kayak gini, gak boleh dibolak-balik:
-
-```go
-auth.RequireAuth -> auth.WithUser(userService) -> auth.RequireRole(...)
-```
-
-Biar gak capek nulis 3 middleware tiap route, ada helper `chain` di
-`internal/server/server.go`:
-
-```go
-s.mux.Handle("PATCH /api/v1/admin/hospitals/{id}/verify",
-    s.chain(deps, http.HandlerFunc(deps.HospitalHandler.Verify), RoleAdmin),
-)
-```
-
-> Dulu sempet ada bug di `RequireRole` - parameter role-nya gak dicek sama
-> sekali, jadi siapa aja yang udah login bisa akses endpoint admin. Udah
-> diperbaiki, sekarang role-nya beneran dicek dari database, bukan dari
-> klaim yang dikirim client.
-
-**Kalau mau nambah endpoint baru, tolong diinget:**
-1. Jangan pernah percaya role/identitas dari body request. Selalu ambil dari
-   `auth.GetAuthUser(r)` setelah middleware jalan.
-2. Buat endpoint yang sifatnya milik satu user (misal approve access
-   request), tetep cek kepemilikan di service layer (`req.PatientID ==
-   authUser.ID`). Role doang gak cukup.
-3. Endpoint yang khusus admin/staff wajib lewat `s.chain(..., RoleAdmin)`
-   atau `s.chain(..., RoleStaff)`. Jangan taruh langsung di `mux.Handle`
-   tanpa role check kalau memang harusnya dibatasi.
-
-## 4. Soal audit trail ("blockchain"-nya)
-
-`internal/audit` itu isinya hash chain di Postgres: tiap entri nyimpen
-`sha256(prevHash + data)`, jadi urutan kejadian gak bisa diubah sepihak
-tanpa ngerusak seluruh rantai setelahnya. Ini yang jadi "permissioned
-blockchain proof of concept" yang disebut di SRS. **Data pribadi pasien
-gak pernah masuk ke chain ini**, yang disimpen cuma hash-nya sama metadata
-kecil (aksi apa, kapan, siapa).
-
-Interface-nya sengaja dipisah biar kalau nanti tim mau ganti ke blockchain
-permissioned beneran (misal Hyperledger Fabric), tinggal bikin implementasi
-baru dengan method yang sama - `patient` sama `access` gak perlu diubah
-sama sekali.
-
-## 4.5. NIK - kenapa perlu diperlakukan beda dari field lain
-
-NIK itu data paling sensitif di seluruh sistem ini, jadi diperlakukan beda
-dari field lain kayak nama atau alamat. Ada dua masalah yang dipisahin, dan
-dua-duanya udah ditangani:
-
-**Masalah 1 - NIK kesimpen plain text di Postgres.**
-Kalau database-nya suatu saat bocor/di-dump, NIK semua pasien ikut bocor
-mentah-mentah. Solusinya: `internal/crypto` nyediain `FieldCipher` yang
-ngenkripsi NIK (dan nomor asuransi) pake AES-256-GCM sebelum disimpen, dan
-otomatis didekripsi lagi pas dibaca. Prosesnya transparan - service &
-handler tetep kerja sama string biasa, cuma `patient/repository.go` aja
-yang tau soal enkripsi ini. Yang kesimpen di kolom `nik` sekarang cuma
-ciphertext acak, beda tiap kali di-enkripsi ulang biar dua orang dengan NIK
-sama pun ciphertext-nya gak keliatan mirip.
-
-**Masalah 2 - hash yang masuk ke audit chain bisa di-brute-force.**
-Sebelumnya, hash yang dicatet ke audit chain itu `sha256(profil)` biasa.
-Kedengeran aman, tapi NIK cuma 16 digit dengan format yang lumayan
-terstruktur (kode wilayah + tanggal lahir + nomor urut), jadi ruang
-kemungkinannya gak sebesar 16 digit acak - orang yang punya hash-nya bisa
-nyoba brute-force offline nebak-nebak NIK sampe ketemu yang cocok.
-Solusinya: pake `KeyedHasher` (HMAC-SHA256 dengan secret key) buat hitung
-hash yang masuk ke chain, bukan SHA256 polos. Tanpa tau key-nya, brute-force
-itu jadi gak feasible lagi.
-
-Ada 3 key terpisah yang dipakai (lihat `.env.example`):
-- `FIELD_ENCRYPTION_KEY` - buat enkripsi/dekripsi NIK & nomor asuransi.
-- `NIK_HASH_KEY` - buat hash pencarian/keunikan NIK yang kesimpen di kolom
-  `nik_hash` (biar sistem masih bisa cek "NIK ini udah kedaftar belum" tanpa
-  perlu dekripsi semua baris satu-satu).
-- `AUDIT_HASH_KEY` - buat hash yang masuk ke audit chain.
-
-Sengaja dipisah tiga-tiganya (bukan satu key buat semua) - kalau salah satu
-bocor entah gimana, yang lain masih aman. Di production, key-key ini
-jangan pernah ditaruh di `.env` biasa - pake secrets manager (AWS Secrets
-Manager, Vault, dsb) dan rotate key-nya secara berkala.
-
-> Catatan buat yang udah sempet jalanin migrasi lama: migrasi
-> `000007_encrypt_sensitive_fields` ngasumsiin tabel `patient_profiles`
-> masih kosong. Kalau kamu udah sempet isi data dummy sebelum ini, hapus
-> aja datanya dulu (atau reset volume Postgres-nya) sebelum jalanin migrasi
-> ini, soalnya NIK yang kesimpen plain text sebelumnya gak bisa
-> otomatis ke-enkripsi.
-
-## 5. Semua endpoint & cara pakainya
-
-Semua endpoint (kecuali `/health`) butuh header:
-
-```
-Authorization: Bearer <clerk_jwt_token>
-```
-
-Dan `POST`/`PUT` selalu `Content-Type: application/json`.
-
-### Umum (siapa aja yang udah login)
-
-#### `POST /api/v1/users/sync`
-Wajib dipanggil **sekali** habis user pertama kali login/daftar lewat Clerk
-- ini yang bikin baris di tabel `users` kita (role default-nya `PATIENT`).
-Kalau belum pernah manggil ini, semua endpoint lain bakal nolak dengan
-`user_not_registered`. Idempotent, jadi aman dipanggil berkali-kali, kalau
-udah ada ya balikin yang udah ada aja.
-
-```bash
-curl -X POST http://localhost:8080/api/v1/users/sync \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-Response (201 kalau baru, 200 kalau udah ada):
-```json
-{
-  "id": "a1b2c3d4-...",
-  "clerkUserId": "user_2abc...",
-  "role": "PATIENT",
-  "status": "ACTIVE",
-  "createdAt": "2026-08-26T10:00:00Z",
-  "updatedAt": "2026-08-26T10:00:00Z"
-}
-```
-
-#### `GET /api/v1/me`
-Buat cek "login sebagai siapa sih, role-nya apa". Enak buat debugging
-atau nentuin UI mana yang harus ditampilin di app.
-
-```bash
-curl http://localhost:8080/api/v1/me -H "Authorization: Bearer $TOKEN"
-```
-
-#### `GET /api/v1/hospitals`
-List rumah sakit yang statusnya `ACTIVE` aja - buat pasien milih mau daftar
-ke rumah sakit mana. gak perlu role khusus, yang penting udah pernah sync.
-
-```bash
-curl http://localhost:8080/api/v1/hospitals -H "Authorization: Bearer $TOKEN"
+```text
+000001_create_users
+000002_create_hospitals
+000003_create_patient_profiles
+000004_create_identity_verifications
+000005_create_hospital_staff
+000006_create_access_requests
+000007_create_audit_logs
+000008_encrypt_sensitive_fields
+000009_create_patient_qr_credentials
 ```
 
 ---
 
-### Endpoint khusus PATIENT
-
-Sebelum ini semua dipakai, user harus udah role `PATIENT` (default habis
-sync) dan udah bikin profile dulu.
-
-#### `POST /api/v1/patient/profile`
-Isi data diri sekali aja - ini yang bikin `patientCode` unik yang nanti
-dikasih ke petugas rumah sakit pas mau daftar.
+## 1.4. Jalankan API
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/patient/profile \
+make run
+```
+
+Default API:
+
+```text
+http://localhost:8080
+```
+
+Test:
+
+```bash
+curl http://localhost:8080/health
+```
+
+Response:
+
+```json
+{
+  "status": "ok"
+}
+```
+
+Jika response tersebut muncul, API sudah berjalan.
+
+---
+
+# 2. Struktur Project
+
+Struktur utama backend:
+
+```text
+backend/
+├── cmd/
+│   └── api/
+│       └── main.go
+│
+├── internal/
+│   ├── access/
+│   ├── audit/
+│   ├── auth/
+│   ├── blockchain/
+│   ├── config/
+│   ├── crypto/
+│   ├── hospital/
+│   ├── middleware/
+│   ├── patient/
+│   │   └── identify/
+│   ├── patientqr/
+│   ├── server/
+│   └── user/
+│
+├── migrations/
+│
+├── storage/
+│   └── identity/
+│
+├── .env.example
+├── go.mod
+└── go.sum
+```
+
+Setiap domain umumnya memiliki pola:
+
+```text
+model.go
+dto.go
+errors.go
+repository.go
+service.go
+handler.go
+```
+
+Tidak semua package harus memiliki seluruh file tersebut.
+
+Alur request:
+
+```text
+HTTP Request
+     │
+     ▼
+   Handler
+     │
+     ▼
+   Service
+     │
+     ▼
+ Repository
+     │
+     ▼
+ PostgreSQL
+```
+
+`cmd/api/main.go` digunakan untuk melakukan wiring antar-komponen.
+
+Routing HTTP berada di:
+
+```text
+internal/server/server.go
+```
+
+---
+
+# 3. Auth & Role
+
+Akesa menggunakan **Clerk** untuk authentication.
+
+Mobile app mengirim JWT Clerk melalui:
+
+```http
+Authorization: Bearer <clerk_jwt_token>
+```
+
+Backend kemudian melakukan:
+
+```text
+Clerk JWT
+   │
+   ▼
+auth.RequireAuth
+   │
+   ▼
+auth.WithUser
+   │
+   ▼
+Load user dari PostgreSQL
+   │
+   ▼
+AuthUser
+   │
+   ├── ID
+   ├── Role
+   └── Status
+```
+
+Role aplikasi disimpan di database sendiri:
+
+```text
+PATIENT
+HOSPITAL_STAFF
+ADMIN
+```
+
+Role **tidak boleh dipercaya dari request body atau data yang dikirim client**.
+
+Untuk endpoint yang membutuhkan role tertentu, gunakan:
+
+```go
+s.chain(deps, handler, RoleAdmin)
+```
+
+atau:
+
+```go
+s.chain(deps, handler, RoleStaff)
+```
+
+Urutan middleware:
+
+```text
+auth.RequireAuth
+        ↓
+auth.WithUser
+        ↓
+auth.RequireRole(...)
+```
+
+Contoh:
+
+```go
+s.mux.Handle(
+    "PATCH /api/v1/admin/hospitals/{id}/verify",
+    s.chain(
+        deps,
+        http.HandlerFunc(deps.HospitalHandler.Verify),
+        RoleAdmin,
+    ),
+)
+```
+
+Selain pengecekan role, endpoint yang berkaitan dengan resource milik user juga harus melakukan pengecekan ownership di service layer.
+
+Contohnya:
+
+```text
+Patient A
+   │
+   └── Access Request A
+
+Patient B tidak boleh approve
+Access Request A
+```
+
+---
+
+# 4. Audit Trail & Hybrid Blockchain
+
+Akesa memiliki audit trail yang digunakan untuk mencatat aktivitas penting dalam sistem.
+
+Audit trail menggunakan **hash chain**.
+
+Secara sederhana:
+
+```text
+Block 1
+  │
+  ▼
+Block 2
+  │
+  ▼
+Block 3
+  │
+  ▼
+Block 4
+```
+
+Setiap entry memiliki hubungan dengan hash entry sebelumnya.
+
+Konsep sederhananya:
+
+```text
+currentHash = HMAC(previousHash + data)
+```
+
+Jika satu entry lama diubah, hash setelahnya akan ikut berubah sehingga integritas rantai dapat diverifikasi.
+
+Data pribadi pasien **tidak dimasukkan langsung ke blockchain/audit chain**.
+
+Yang dicatat terutama adalah:
+
+* event/action
+* actor
+* timestamp
+* resource
+* hash
+* metadata yang diperlukan untuk audit
+
+---
+
+## 4.1. Hybrid Blockchain
+
+Backend juga memiliki package:
+
+```text
+internal/blockchain/
+```
+
+dan smart contract:
+
+```text
+contracts/
+└── contracts/
+    └── AkesaAuditLedger.sol
+```
+
+Arsitektur yang digunakan:
+
+```text
+                Akesa Backend
+                     │
+          ┌──────────┴──────────┐
+          │                     │
+          ▼                     ▼
+   PostgreSQL Hash Chain     EVM Blockchain
+          │                     │
+          └──────────┬──────────┘
+                     ▼
+              Integrity Check
+```
+
+PostgreSQL digunakan untuk menyimpan audit trail aplikasi, sedangkan blockchain digunakan sebagai lapisan tambahan untuk membuktikan integritas data audit.
+
+Implementasi blockchain ini masih merupakan bagian dari **proof of concept**, sehingga konfigurasi network, contract address, dan deployment dapat berbeda antara environment development dan production.
+
+---
+
+## 4.2. Verifikasi Audit Chain
+
+Endpoint:
+
+```http
+GET /api/v1/audit/verify-chain
+```
+
+Endpoint ini digunakan untuk melakukan pengecekan integritas audit chain.
+
+```bash
+curl http://localhost:8080/api/v1/audit/verify-chain \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Endpoint ini membutuhkan authentication.
+
+---
+
+# 5. Enkripsi Data Sensitif
+
+Data tertentu tidak disimpan sebagai plaintext di PostgreSQL.
+
+Saat ini field sensitif seperti:
+
+* NIK
+* nomor asuransi
+
+diproses menggunakan encryption layer di:
+
+```text
+internal/crypto/
+```
+
+NIK menggunakan:
+
+```text
+AES-256-GCM
+```
+
+sebelum disimpan ke database.
+
+Selain ciphertext NIK, backend juga menyimpan:
+
+```text
+nik_hash
+```
+
+yang digunakan untuk mencari uniqueness NIK tanpa harus melakukan dekripsi seluruh data.
+
+---
+
+## 5.1. Key yang Digunakan
+
+Ada tiga key utama:
+
+```env
+FIELD_ENCRYPTION_KEY=...
+NIK_HASH_KEY=...
+AUDIT_HASH_KEY=...
+```
+
+Fungsinya berbeda:
+
+| Key                    | Fungsi                                    |
+| ---------------------- | ----------------------------------------- |
+| `FIELD_ENCRYPTION_KEY` | Enkripsi/dekripsi field sensitif          |
+| `NIK_HASH_KEY`         | HMAC/hash NIK untuk lookup dan uniqueness |
+| `AUDIT_HASH_KEY`       | Hash untuk audit trail                    |
+
+Jangan menggunakan satu key untuk semua fungsi.
+
+Untuk production, key sebaiknya disimpan menggunakan secrets manager seperti Vault atau cloud secrets manager, bukan `.env` biasa.
+
+---
+
+# 6. Identity / KTP Verification
+
+Akesa memiliki sistem identity verification untuk memverifikasi identitas pasien berdasarkan dokumen KTP.
+
+Perlu dibedakan:
+
+```text
+Clerk Authentication
+        │
+        ▼
+"Siapa yang sedang login?"
+```
+
+sedangkan:
+
+```text
+KTP Verification
+        │
+        ▼
+"Apakah identitas pasien sesuai dengan dokumen identitas?"
+```
+
+Jadi berhasil login menggunakan Clerk **tidak berarti identitas KTP pasien sudah terverifikasi**.
+
+---
+
+## 6.1. Status Verification
+
+Status yang digunakan:
+
+| Status              | Keterangan                               |
+| ------------------- | ---------------------------------------- |
+| `PENDING`           | Verification baru dibuat                 |
+| `PROCESSING`        | Verification sedang diproses             |
+| `DOCUMENT_REJECTED` | Dokumen ditolak                          |
+| `DATA_MISMATCH`     | Data dokumen tidak sesuai dengan profile |
+| `LIVENESS_FAILED`   | Liveness check gagal                     |
+| `FACE_MISMATCH`     | Face matching gagal                      |
+| `MANUAL_REVIEW`     | Menunggu pemeriksaan manual              |
+| `VERIFIED`          | Identitas berhasil diverifikasi          |
+| `EXPIRED`           | Verification sudah tidak berlaku         |
+
+### Catatan implementasi
+
+Implementasi backend saat ini mendukung **manual review**.
+
+Artinya status:
+
+```text
+MANUAL_REVIEW
+      │
+      ├── approve
+      │      ↓
+      │   VERIFIED
+      │
+      └── reject
+             ↓
+      DOCUMENT_REJECTED
+```
+
+Status seperti:
+
+```text
+PROCESSING
+DATA_MISMATCH
+LIVENESS_FAILED
+FACE_MISMATCH
+```
+
+sudah disiapkan pada model untuk mendukung pengembangan identity verification yang lebih otomatis di tahap berikutnya.
+
+**Jangan menganggap sistem saat ini sudah melakukan OCR KTP, liveness detection, atau face matching otomatis jika provider tersebut belum diintegrasikan.**
+
+---
+
+# 7. Endpoint Identity Verification
+
+Semua endpoint berikut membutuhkan:
+
+```http
+Authorization: Bearer <clerk_jwt_token>
+```
+
+---
+
+## 7.1. Membuat Verification
+
+```http
+POST /api/v1/patient/identity/verifications
+```
+
+Digunakan untuk membuat proses verification baru untuk pasien yang sedang login.
+
+```bash
+curl -X POST \
+  http://localhost:8080/api/v1/patient/identity/verifications \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Response berisi informasi verification seperti:
+
+```json
+{
+  "id": "verification-uuid",
+  "status": "PENDING",
+  "documentType": "KTP"
+}
+```
+
+---
+
+## 7.2. Melihat Verification
+
+```http
+GET /api/v1/patient/identity/verifications/{id}
+```
+
+Contoh:
+
+```bash
+curl \
+  http://localhost:8080/api/v1/patient/identity/verifications/<verificationId> \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Pasien hanya boleh melihat verification miliknya sendiri.
+
+---
+
+## 7.3. Melihat Verification Terbaru
+
+```http
+GET /api/v1/patient/identity/verifications/latest
+```
+
+Endpoint ini digunakan mobile app untuk mengetahui status verification terbaru setelah aplikasi restart atau user login kembali.
+
+```bash
+curl \
+  http://localhost:8080/api/v1/patient/identity/verifications/latest \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Jika pasien belum pernah membuat verification, endpoint dapat mengembalikan:
+
+```http
+404 Not Found
+```
+
+Mobile app dapat memperlakukan kondisi tersebut sebagai:
+
+```text
+belum melakukan verification
+```
+
+---
+
+## 7.4. Upload Dokumen KTP
+
+```http
+POST /api/v1/patient/identity/verifications/{id}/document
+```
+
+Endpoint ini digunakan untuk meng-upload dokumen KTP.
+
+Contoh:
+
+```bash
+curl -X POST \
+  http://localhost:8080/api/v1/patient/identity/verifications/<verificationId>/document \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "document=@ktp.jpg"
+```
+
+Format dokumen yang didukung oleh implementasi saat ini:
+
+```text
+.jpg
+.png
+```
+
+Dokumen disimpan menggunakan storage key yang terpisah dari data profile.
+
+Struktur penyimpanan:
+
+```text
+storage/
+└── identity/
+    └── <patientID>/
+        └── <verificationID>/
+            └── <uuid>.jpg
+```
+
+Folder storage identity **tidak boleh diekspos sebagai static/public directory**.
+
+---
+
+# 8. Admin Identity Verification
+
+Admin dapat melakukan review terhadap verification pasien.
+
+Endpoint admin menggunakan role:
+
+```text
+ADMIN
+```
+
+---
+
+## 8.1. Approve Verification
+
+```http
+POST /api/v1/admin/identity-verifications/{id}/approve
+```
+
+Contoh:
+
+```bash
+curl -X POST \
+  http://localhost:8080/api/v1/admin/identity-verifications/<verificationId>/approve \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Verification yang berada pada status:
+
+```text
+MANUAL_REVIEW
+```
+
+dapat diubah menjadi:
+
+```text
+VERIFIED
+```
+
+---
+
+## 8.2. Reject Verification
+
+```http
+POST /api/v1/admin/identity-verifications/{id}/reject
+```
+
+Contoh:
+
+```bash
+curl -X POST \
+  http://localhost:8080/api/v1/admin/identity-verifications/<verificationId>/reject \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reason": "Dokumen KTP tidak dapat diverifikasi"
+  }'
+```
+
+Verification yang ditolak akan memiliki status:
+
+```text
+DOCUMENT_REJECTED
+```
+
+Alur sederhananya:
+
+```text
+Patient
+   │
+   ▼
+Create Verification
+   │
+   ▼
+Upload KTP
+   │
+   ▼
+MANUAL_REVIEW
+   │
+   ├───────────────┐
+   ▼               ▼
+APPROVE          REJECT
+   │               │
+   ▼               ▼
+VERIFIED       DOCUMENT_REJECTED
+```
+
+---
+
+# 9. Patient Profile
+
+Sebelum menggunakan fitur pasien lainnya, user harus memiliki role:
+
+```text
+PATIENT
+```
+
+dan melakukan profile setup.
+
+---
+
+## 9.1. Create Profile
+
+```http
+POST /api/v1/patient/profile
+```
+
+Contoh:
+
+```bash
+curl -X POST \
+  http://localhost:8080/api/v1/patient/profile \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -277,67 +813,256 @@ curl -X POST http://localhost:8080/api/v1/patient/profile \
   }'
 ```
 
-Field opsional yang bisa ditambahin: `bloodType`, `insuranceNumber`,
-`emergencyContactName`, `emergencyContactPhone`. `gender` cuma nerima
-`MALE` atau `FEMALE`, `nik` harus persis 16 digit, `dateOfBirth` formatnya
-`YYYY-MM-DD`.
+Field utama:
 
-Response bakal ngasih `patientCode` (contoh: `AKS-4F2A9C1D`) - **catet ini**,
-soalnya ini yang dipakai petugas RS buat cari data kamu.
-
-NIK-nya sendiri disimpen terenkripsi di database (lihat section 4.5), tapi
-di request/response API tetep string biasa kayak biasa - enkripsinya
-kejadian di belakang layar, gak ngubah cara app manggil endpoint ini.
-Kalau NIK yang dikirim udah kepake di profile lain, bakal kena `409
-nik_already_registered`.
-
-#### `GET /api/v1/patient/profile`
-Liat profile sendiri.
-
-#### `PUT /api/v1/patient/profile`
-Update profile. Body-nya sama kayak `POST`, semua field wajib diisi ulang
-(bukan partial update).
-
-#### `GET /api/v1/patient/access-requests`
-List semua permintaan akses yang pernah masuk ke kamu - baik yang masih
-`PENDING`, udah `APPROVED`, `REJECTED`, atau `REVOKED`.
-
-#### `POST /api/v1/patient/access-requests/{id}/approve`
-Setujui permintaan akses. `{id}` diambil dari list di atas.
-
-```bash
-curl -X POST http://localhost:8080/api/v1/patient/access-requests/<id>/approve \
-  -H "Authorization: Bearer $TOKEN"
+```text
+fullName
+nik
+dateOfBirth
+gender
+phoneNumber
+address
 ```
 
-Cuma bisa approve request yang statusnya masih `PENDING` dan itu request
-punya kamu sendiri (dicek di server, bukan cuma dipercaya dari client).
+Field tambahan:
 
-#### `POST /api/v1/patient/access-requests/{id}/reject`
-Sama kayak approve, tapi nolak. Sama-sama cuma bisa dari status `PENDING`.
+```text
+bloodType
+drugAllergy
+medicalHistory
+insuranceNumber
+emergencyContactName
+emergencyContactPhone
+```
 
-#### `POST /api/v1/patient/access-requests/{id}/revoke`
-Ini beda - buat nyabut akses yang **sebelumnya udah di-approve**. Bisa
-kapan aja, gak ada batas waktu. Habis di-revoke, RS yang bersangkutan
-langsung gak bisa lagi ambil data lewat request itu.
+`gender`:
 
-#### `GET /api/v1/patient/history`
-Riwayat lengkap - semua perubahan profile, keputusan approve/reject/revoke,
-sama kapan aja data kamu diakses RS. Ini yang narik dari audit hash chain.
+```text
+MALE
+FEMALE
+```
+
+NIK harus terdiri dari:
+
+```text
+16 digit
+```
 
 ---
 
-### Endpoint khusus HOSPITAL_STAFF
+## 9.2. Get Profile
 
-User perlu udah dilink ke suatu rumah sakit sama admin dulu (lewat endpoint
-admin di bawah) sebelum bisa pakai ini.
-
-#### `POST /api/v1/hospital/access-requests`
-Ajuin permintaan liat data pasien tertentu. `patientCode` didapet dari
-pasiennya langsung (dikasih tau pas daftar).
+```http
+GET /api/v1/patient/profile
+```
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/hospital/access-requests \
+curl \
+  http://localhost:8080/api/v1/patient/profile \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+## 9.3. Update Profile
+
+```http
+PUT /api/v1/patient/profile
+```
+
+Body menggunakan format profile yang sama seperti create profile.
+
+```bash
+curl -X PUT \
+  http://localhost:8080/api/v1/patient/profile \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fullName": "Budi Santoso",
+    "nik": "3271000000000001",
+    "dateOfBirth": "1995-06-12",
+    "gender": "MALE",
+    "phoneNumber": "081234567890",
+    "address": "Jl. Merdeka No. 2, Jakarta"
+  }'
+```
+
+Jika identity verification pasien sudah `VERIFIED`, field identitas yang berasal dari KTP harus diperlakukan sebagai data yang sudah terverifikasi.
+
+Pada sisi mobile, field identitas dapat dibuat non-editable.
+
+Backend juga perlu melakukan enforcement sehingga client tidak dapat mengubah data terverifikasi hanya dengan memodifikasi request HTTP.
+
+---
+
+# 10. User Synchronization
+
+## `POST /api/v1/users/sync`
+
+Setelah user pertama kali login/register menggunakan Clerk, mobile app harus melakukan sync ke backend.
+
+```bash
+curl -X POST \
+  http://localhost:8080/api/v1/users/sync \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+User baru akan dibuat dengan role default:
+
+```text
+PATIENT
+```
+
+Endpoint bersifat idempotent.
+
+Artinya aman dipanggil berkali-kali.
+
+---
+
+# 11. Current User
+
+## `GET /api/v1/me`
+
+Digunakan untuk mendapatkan informasi user yang sedang login.
+
+```bash
+curl \
+  http://localhost:8080/api/v1/me \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Endpoint ini berguna untuk mengetahui:
+
+```text
+internal user ID
+Clerk user ID
+role
+status
+```
+
+---
+
+# 12. Hospital
+
+## `GET /api/v1/hospitals`
+
+Menampilkan rumah sakit dengan status:
+
+```text
+ACTIVE
+```
+
+```bash
+curl \
+  http://localhost:8080/api/v1/hospitals \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Endpoint ini digunakan pasien atau user yang sudah terdaftar untuk melihat rumah sakit yang tersedia.
+
+---
+
+# 13. Patient Access Request
+
+## `GET /api/v1/patient/access-requests`
+
+Menampilkan request akses yang masuk ke pasien.
+
+Status yang dapat ditemukan antara lain:
+
+```text
+PENDING
+APPROVED
+REJECTED
+REVOKED
+```
+
+---
+
+## `POST /api/v1/patient/access-requests/{id}/approve`
+
+Menyetujui access request.
+
+```bash
+curl -X POST \
+  http://localhost:8080/api/v1/patient/access-requests/<id>/approve \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Request harus:
+
+```text
+PENDING
+```
+
+dan harus dimiliki oleh pasien yang sedang login.
+
+---
+
+## `POST /api/v1/patient/access-requests/{id}/reject`
+
+Menolak request.
+
+```bash
+curl -X POST \
+  http://localhost:8080/api/v1/patient/access-requests/<id>/reject \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+## `POST /api/v1/patient/access-requests/{id}/revoke`
+
+Mencabut akses yang sebelumnya telah diberikan.
+
+```bash
+curl -X POST \
+  http://localhost:8080/api/v1/patient/access-requests/<id>/revoke \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Setelah revoke, rumah sakit tidak dapat lagi menggunakan request tersebut untuk mengambil data pasien.
+
+---
+
+# 14. Patient History
+
+## `GET /api/v1/patient/history`
+
+Menampilkan riwayat aktivitas pasien yang dicatat melalui audit trail.
+
+Contohnya:
+
+```text
+PROFILE_CREATED
+PROFILE_UPDATED
+ACCESS_REQUEST_APPROVED
+ACCESS_REQUEST_REJECTED
+ACCESS_REVOKED
+DATA_ACCESSED
+```
+
+Jenis event yang tersedia dapat berkembang mengikuti implementasi audit service.
+
+---
+
+# 15. Hospital Staff
+
+Hospital staff harus sudah dihubungkan dengan rumah sakit oleh admin.
+
+---
+
+## 15.1. Create Access Request
+
+```http
+POST /api/v1/hospital/access-requests
+```
+
+Contoh:
+
+```bash
+curl -X POST \
+  http://localhost:8080/api/v1/hospital/access-requests \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -347,26 +1072,54 @@ curl -X POST http://localhost:8080/api/v1/hospital/access-requests \
   }'
 ```
 
-Kategori yang valid: `IDENTITY`, `CONTACT`, `MEDICAL_BASIC`, `INSURANCE`,
-`EMERGENCY_CONTACT`. Minta secukupnya aja sesuai kebutuhan pendaftaran -
-sistemnya emang didesain biar RS cuma minta kategori yang relevan, bukan
-"kasih semua datanya".
+Kategori data:
 
-#### `GET /api/v1/hospital/access-requests`
-List semua request yang pernah diajukan RS kamu (bukan cuma yang kamu ajuin
-sendiri, tapi semua staff di RS yang sama), plus status-nya masing-masing.
+```text
+IDENTITY
+CONTACT
+MEDICAL_BASIC
+INSURANCE
+EMERGENCY_CONTACT
+```
 
-#### `GET /api/v1/hospital/access-requests/{id}/data`
-Ambil data pasiennya - **cuma jalan kalau request-nya udah `APPROVED`**.
-Kalau masih pending atau udah di-revoke, bakal ditolak.
+Rumah sakit hanya meminta kategori data yang diperlukan.
+
+---
+
+## 15.2. List Access Request
+
+```http
+GET /api/v1/hospital/access-requests
+```
+
+Menampilkan request yang berkaitan dengan rumah sakit tempat staff tersebut terdaftar.
+
+---
+
+## 15.3. Get Patient Data
+
+```http
+GET /api/v1/hospital/access-requests/{id}/data
+```
+
+Data hanya dapat diambil jika:
+
+```text
+request.status == APPROVED
+```
+
+Contoh:
 
 ```bash
-curl http://localhost:8080/api/v1/hospital/access-requests/<id>/data \
+curl \
+  http://localhost:8080/api/v1/hospital/access-requests/<id>/data \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-Response-nya cuma field yang sesuai kategori yang disetujui pasien, misal
-kalau cuma disetujui `IDENTITY`:
+Response hanya berisi kategori data yang disetujui pasien.
+
+Misalnya:
+
 ```json
 {
   "patientCode": "AKS-4F2A9C1D",
@@ -376,25 +1129,40 @@ kalau cuma disetujui `IDENTITY`:
   "gender": "MALE"
 }
 ```
-Nomor telepon, alamat, dst gak bakal ikut kebawa kalau kategori `CONTACT`
-gak disetujui. Tiap kali endpoint ini dipanggil, otomatis kecatet di audit
-log sebagai `DATA_ACCESSED`.
+
+Jika pasien tidak memberikan permission untuk kategori `CONTACT`, maka field seperti nomor telepon atau alamat tidak dikembalikan.
+
+Setiap akses data dicatat ke audit trail.
 
 ---
 
-### Endpoint khusus ADMIN
+# 16. Admin Hospital Management
 
-Buat testing, cara paling gampang jadi admin: sync dulu biasa, terus update
-manual di database:
+Untuk development/testing, user dapat dipromosikan menjadi admin secara manual:
+
 ```sql
-UPDATE users SET role = 'ADMIN' WHERE clerk_user_id = '<clerk_user_id_kamu>';
+UPDATE users
+SET role = 'ADMIN'
+WHERE clerk_user_id = '<clerk_user_id>';
 ```
 
-#### `POST /api/v1/admin/hospitals`
-Daftarin rumah sakit baru. Status awalnya otomatis `PENDING`.
+---
+
+## `POST /api/v1/admin/hospitals`
+
+Mendaftarkan rumah sakit.
+
+Status awal:
+
+```text
+PENDING
+```
+
+Contoh:
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/admin/hospitals \
+curl -X POST \
+  http://localhost:8080/api/v1/admin/hospitals \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -406,33 +1174,59 @@ curl -X POST http://localhost:8080/api/v1/admin/hospitals \
   }'
 ```
 
-#### `GET /api/v1/admin/hospitals`
-List semua rumah sakit, apapun statusnya (beda sama `GET /hospitals` yang
-cuma nampilin yang `ACTIVE`).
+---
 
-#### `PATCH /api/v1/admin/hospitals/{id}/verify`
-Ubah status dari `PENDING` ke `VERIFIED`.
+## `GET /api/v1/admin/hospitals`
 
-#### `PATCH /api/v1/admin/hospitals/{id}/activate`
-Ubah ke `ACTIVE` - abis ini baru rumah sakitnya nongol di `GET /hospitals`
-dan staff-nya bisa mulai ngajuin access request.
+Menampilkan seluruh rumah sakit tanpa memfilter status.
 
-#### `PATCH /api/v1/admin/hospitals/{id}/deactivate`
-Nonaktifin RS. Semua tiga endpoint di atas bentuknya sama, cuma beda status
-tujuannya, dan sama-sama gak butuh body.
+---
 
-```bash
-curl -X PATCH http://localhost:8080/api/v1/admin/hospitals/<id>/activate \
-  -H "Authorization: Bearer $TOKEN"
+## `PATCH /api/v1/admin/hospitals/{id}/verify`
+
+Mengubah rumah sakit:
+
+```text
+PENDING → VERIFIED
 ```
 
-#### `POST /api/v1/admin/hospitals/{id}/staff`
-Nge-link user yang udah sync ke suatu rumah sakit, sekalian promosiin
-role-nya jadi `HOSPITAL_STAFF`. `userId` diambil dari `GET /me` punya user
-yang mau dijadiin staff (bukan Clerk user id-nya, tapi `id` internal kita).
+---
+
+## `PATCH /api/v1/admin/hospitals/{id}/activate`
+
+Mengaktifkan rumah sakit.
+
+```text
+VERIFIED → ACTIVE
+```
+
+Setelah `ACTIVE`, rumah sakit dapat muncul pada:
+
+```text
+GET /api/v1/hospitals
+```
+
+---
+
+## `PATCH /api/v1/admin/hospitals/{id}/deactivate`
+
+Menonaktifkan rumah sakit.
+
+---
+
+## `POST /api/v1/admin/hospitals/{id}/staff`
+
+Menghubungkan user ke rumah sakit dan menjadikannya:
+
+```text
+HOSPITAL_STAFF
+```
+
+Contoh:
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/admin/hospitals/<hospitalId>/staff \
+curl -X POST \
+  http://localhost:8080/api/v1/admin/hospitals/<hospitalId>/staff \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -442,20 +1236,27 @@ curl -X POST http://localhost:8080/api/v1/admin/hospitals/<hospitalId>/staff \
   }'
 ```
 
-### `GET /api/v1/patient/qr`
+`userId` merupakan ID internal pada database Akesa, bukan Clerk User ID.
 
-Ambil QR credential milik pasien yang sedang login.
+---
 
-Endpoint ini digunakan mobile app untuk menampilkan QR pasien kepada petugas
-rumah sakit saat proses pendaftaran.
+# 17. Patient QR Credential
 
-**Penting:** endpoint ini tidak memberikan izin kepada rumah sakit untuk
-langsung mengakses data pasien. QR hanya berfungsi sebagai credential untuk
-mengidentifikasi pasien. Akses data tetap mengikuti mekanisme
-`access-request` dan persetujuan pasien yang dijelaskan di atas.
+QR digunakan sebagai credential untuk membantu proses identifikasi pasien.
+
+QR **bukan permission data**.
+
+Memiliki QR tidak otomatis memberikan rumah sakit akses ke data pasien.
+
+---
+
+## `GET /api/v1/patient/qr`
+
+Mengambil QR credential pasien yang sedang login.
 
 ```bash
-curl http://localhost:8080/api/v1/patient/qr \
+curl \
+  http://localhost:8080/api/v1/patient/qr \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -469,162 +1270,458 @@ Response:
 }
 ```
 
-Field response:
-
 | Field         | Tipe      | Keterangan                                          |
 | ------------- | --------- | --------------------------------------------------- |
-| `displayCode` | `string`  | Kode yang dapat ditampilkan sebagai identifier QR   |
+| `displayCode` | `string`  | Identifier QR yang dapat ditampilkan                |
 | `qrPayload`   | `string`  | Payload yang digunakan untuk menghasilkan gambar QR |
-| `isActive`    | `boolean` | Menunjukkan apakah credential QR masih aktif        |
+| `isActive`    | `boolean` | Menunjukkan apakah credential masih aktif           |
 
-Mobile app bertanggung jawab untuk mengubah `qrPayload` menjadi gambar QR dan
-menampilkannya kepada pasien.
+Mobile app bertanggung jawab mengubah `qrPayload` menjadi gambar QR.
 
-Untuk keamanan pada sisi mobile, QR sebaiknya hanya ditampilkan setelah user
-berhasil melakukan verifikasi keamanan perangkat seperti fingerprint, Face ID,
-PIN, pattern, atau password perangkat. Verifikasi ini dilakukan di aplikasi
-mobile, bukan oleh endpoint backend.
+---
 
-#### `POST /api/v1/patient/qr/rotate`
+## `POST /api/v1/patient/qr/rotate`
 
-Membuat credential QR baru untuk pasien yang sedang login dan menonaktifkan
-credential QR sebelumnya.
-
-Endpoint ini digunakan ketika pasien ingin memperbarui QR, misalnya karena
-QR sebelumnya sudah pernah ditampilkan kepada pihak lain atau pasien ingin
-mengganti credential yang sedang digunakan.
+Membuat credential QR baru dan menonaktifkan credential sebelumnya.
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/patient/qr/rotate \
+curl -X POST \
+  http://localhost:8080/api/v1/patient/qr/rotate \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-Response:
-
-```json
-{
-  "displayCode": "AKS-8B4D1E52",
-  "qrPayload": "AKESA-QR-...",
-  "isActive": true
-}
-```
-
-Setelah rotasi berhasil, QR credential sebelumnya menjadi tidak aktif dan
-tidak boleh lagi dianggap sebagai credential QR pasien yang valid.
-
-**Catatan keamanan:**
-
-* QR tidak sama dengan izin akses data pasien.
-* Memiliki atau mengetahui QR tidak otomatis memberikan akses ke data medis.
-* Akses data tetap membutuhkan `access-request` dari rumah sakit dan
-  persetujuan pasien.
-* QR sebaiknya tidak ditampilkan kepada orang yang tidak berwenang.
-* `qrPayload` jangan dianggap sebagai data profil pasien dan jangan
-  memasukkan NIK, alamat, atau data medis secara langsung ke dalam payload.
-* Mobile app disarankan melakukan verifikasi keamanan perangkat sebelum
-  menampilkan QR.
-
-## 6. Contoh alur lengkap, dari nol sampai selesai
-
-1. Pasien login/daftar melalui Clerk, kemudian mobile app memanggil
-   `POST /api/v1/users/sync` untuk mendaftarkan user ke database backend.
-
-2. Pasien membuat profile melalui `POST /api/v1/patient/profile` dan
-   mendapatkan `patientCode`.
-
-3. Saat pasien akan melakukan pendaftaran di rumah sakit, mobile app dapat
-   mengambil QR credential melalui `GET /api/v1/patient/qr`.
-
-4. Sebelum QR ditampilkan, mobile app melakukan verifikasi keamanan perangkat
-   seperti fingerprint, Face ID, PIN, pattern, atau password.
-
-5. Setelah berhasil diverifikasi, pasien menunjukkan QR kepada petugas rumah
-   sakit saat proses pendaftaran.
-
-6. Petugas rumah sakit menggunakan informasi dari QR untuk mengidentifikasi
-   pasien, kemudian mengajukan access request melalui
-   `POST /api/v1/hospital/access-requests` dengan kategori data yang memang
-   dibutuhkan.
-
-7. Pasien melihat request tersebut melalui
-   `GET /api/v1/patient/access-requests`.
-
-8. Pasien dapat menyetujui atau menolak request melalui endpoint
-   `approve` atau `reject`.
-
-9. Jika disetujui, petugas rumah sakit dapat mengambil data pasien melalui
-   `GET /api/v1/hospital/access-requests/{id}/data`. Data yang diberikan
-   hanya kategori yang telah disetujui pasien.
-
-10. Jika pasien ingin menghentikan akses, pasien dapat menggunakan endpoint
-    `revoke`. Setelah itu rumah sakit tidak dapat lagi mengambil data melalui
-    request tersebut.
-
-11. Jika pasien ingin mengganti credential QR, mobile app dapat memanggil
-    `POST /api/v1/patient/qr/rotate`. Credential sebelumnya akan
-    dinonaktifkan.
-
-12. Semua aktivitas penting seperti perubahan profile, keputusan access
-    request, rotasi credential, dan akses data dicatat melalui audit trail
-    sesuai implementasi backend.
-
-### Ringkasnya
+Setelah rotation:
 
 ```text
-Pasien Login
-     │
-     ▼
+QR lama → inactive
+QR baru → active
+```
+
+QR sebaiknya hanya ditampilkan setelah user melakukan verifikasi keamanan perangkat seperti:
+
+```text
+Fingerprint
+Face ID
+PIN
+Pattern
+Password perangkat
+```
+
+Verifikasi tersebut dilakukan oleh mobile app, bukan backend endpoint QR.
+
+---
+
+# 18. Alur Utama Pasien
+
+Alur dasar penggunaan Akesa:
+
+```text
+Patient Login/Register
+        │
+        ▼
 POST /users/sync
-     │
-     ▼
+        │
+        ▼
 POST /patient/profile
-     │
-     ▼
+        │
+        ▼
+Create Identity Verification
+        │
+        ▼
+Upload KTP
+        │
+        ▼
+MANUAL_REVIEW
+        │
+        ├───────────────┐
+        ▼               ▼
+     APPROVE          REJECT
+        │
+        ▼
+    VERIFIED
+        │
+        ▼
 GET /patient/qr
-     │
-     ▼
-Verifikasi perangkat
-     │
-     ▼
-Tampilkan QR ke petugas RS
-     │
-     ▼
-Petugas identifikasi pasien
-     │
-     ▼
+        │
+        ▼
+Device Security Check
+        │
+        ▼
+Show QR
+        │
+        ▼
+Hospital Staff identifies patient
+        │
+        ▼
 POST /hospital/access-requests
-     │
-     ▼
-Pasien menerima request
-     │
-     ├───────────────┐
-     ▼               ▼
-  APPROVE          REJECT
-     │
-     ▼
-RS mengambil data
-     │
-     ▼
-Kategori data yang
-disetujui pasien saja
-     │
-     ▼
+        │
+        ▼
+Patient receives request
+        │
+        ├───────────────┐
+        ▼               ▼
+     APPROVE          REJECT
+        │
+        ▼
+Hospital accesses approved data
+        │
+        ▼
 Audit Trail
 ```
 
-**Prinsip penting:** QR hanya membantu proses identifikasi pasien dan tidak
-menggantikan mekanisme permission. Kepemilikan QR tidak berarti rumah sakit
-otomatis memperoleh akses ke data pasien.
+Jika pasien ingin menghentikan akses:
 
-## 7. Hal-hal yang perlu diinget kalau kerja bareng
+```text
+APPROVED
+   │
+   ▼
+REVOKE
+   │
+   ▼
+Hospital access blocked
+```
 
-- Satu branch per fitur/domain aja, misal `feature/hospital-crud`,
-  `feature/access-request-flow`. Jangan digabung-gabung.
-- Migrasi SQL selalu bikin sepasang `.up.sql` / `.down.sql`, nomor urut naik
-  terus. Kalau migrasi udah di-merge ke main, jangan diedit lagi - bikin
-  migrasi baru aja kalau mau ubah sesuatu.
-- Sebelum bikin PR, minimal jalanin `make fmt`, terus pastiin
-  `go build ./...` sama `go vet ./...` bersih, gak ada warning/error.
-- Error di tiap domain selalu pake sentinel error (`var ErrX =
-  errors.New(...)`) terus dicek pake `errors.Is(...)`. Jangan bandingin
-  string pesan error-nya langsung, gampang salah kalau pesannya berubah.
+Jika pasien ingin mengganti credential QR:
+
+```text
+POST /patient/qr/rotate
+        │
+        ▼
+Old QR → inactive
+New QR → active
+```
+
+---
+
+# 19. Ringkasan Endpoint
+
+## Public
+
+| Method | Endpoint  | Keterangan   |
+| ------ | --------- | ------------ |
+| `GET`  | `/`       | Root API     |
+| `GET`  | `/health` | Health check |
+
+## Authenticated User
+
+| Method | Endpoint                     | Keterangan            |
+| ------ | ---------------------------- | --------------------- |
+| `POST` | `/api/v1/users/sync`         | Sync Clerk user       |
+| `GET`  | `/api/v1/me`                 | Current user          |
+| `GET`  | `/api/v1/hospitals`          | List active hospitals |
+| `GET`  | `/api/v1/audit/verify-chain` | Verify audit chain    |
+
+## Patient
+
+| Method | Endpoint                                               | Keterangan                   |
+| ------ | ------------------------------------------------------ | ---------------------------- |
+| `POST` | `/api/v1/patient/profile`                              | Create profile               |
+| `GET`  | `/api/v1/patient/profile`                              | Get profile                  |
+| `PUT`  | `/api/v1/patient/profile`                              | Update profile               |
+| `POST` | `/api/v1/patient/identity/verifications`               | Create identity verification |
+| `GET`  | `/api/v1/patient/identity/verifications/latest`        | Get latest verification      |
+| `GET`  | `/api/v1/patient/identity/verifications/{id}`          | Get verification             |
+| `POST` | `/api/v1/patient/identity/verifications/{id}/document` | Upload KTP                   |
+| `GET`  | `/api/v1/patient/access-requests`                      | List access requests         |
+| `POST` | `/api/v1/patient/access-requests/{id}/approve`         | Approve request              |
+| `POST` | `/api/v1/patient/access-requests/{id}/reject`          | Reject request               |
+| `POST` | `/api/v1/patient/access-requests/{id}/revoke`          | Revoke access                |
+| `GET`  | `/api/v1/patient/history`                              | Patient history              |
+| `GET`  | `/api/v1/patient/qr`                                   | Get QR credential            |
+| `POST` | `/api/v1/patient/qr/rotate`                            | Rotate QR credential         |
+
+## Hospital Staff
+
+| Method | Endpoint                                     | Keterangan                   |
+| ------ | -------------------------------------------- | ---------------------------- |
+| `POST` | `/api/v1/hospital/access-requests`           | Create access request        |
+| `GET`  | `/api/v1/hospital/access-requests`           | List hospital requests       |
+| `GET`  | `/api/v1/hospital/access-requests/{id}/data` | Access approved patient data |
+
+## Admin
+
+| Method  | Endpoint                                            | Keterangan               |
+| ------- | --------------------------------------------------- | ------------------------ |
+| `POST`  | `/api/v1/admin/hospitals`                           | Create hospital          |
+| `GET`   | `/api/v1/admin/hospitals`                           | List all hospitals       |
+| `PATCH` | `/api/v1/admin/hospitals/{id}/verify`               | Verify hospital          |
+| `PATCH` | `/api/v1/admin/hospitals/{id}/activate`             | Activate hospital        |
+| `PATCH` | `/api/v1/admin/hospitals/{id}/deactivate`           | Deactivate hospital      |
+| `POST`  | `/api/v1/admin/hospitals/{id}/staff`                | Assign hospital staff    |
+| `POST`  | `/api/v1/admin/identity-verifications/{id}/approve` | Approve KTP verification |
+| `POST`  | `/api/v1/admin/identity-verifications/{id}/reject`  | Reject KTP verification  |
+
+---
+
+# 20. Migration
+
+Migration SQL berada di:
+
+```text
+backend/migrations/
+```
+
+Setiap migration harus memiliki:
+
+```text
+XXXXXX_description.up.sql
+XXXXXX_description.down.sql
+```
+
+Nomor migration harus terus bertambah.
+
+Contoh:
+
+```text
+000009_create_patient_qr_credentials.up.sql
+000009_create_patient_qr_credentials.down.sql
+```
+
+Setelah migration sudah masuk ke `main`, **jangan mengubah migration lama**.
+
+Jika ada perubahan schema, buat migration baru.
+
+Contoh:
+
+```text
+000010_add_xxx.up.sql
+000010_add_xxx.down.sql
+```
+
+---
+
+# 21. Development Checklist
+
+Sebelum membuat PR:
+
+```bash
+make fmt
+go build ./...
+go vet ./...
+```
+
+Jika ada test:
+
+```bash
+go test ./...
+```
+
+Pastikan:
+
+* Tidak ada secret yang masuk Git
+* `.env` tidak di-commit
+* Migration memiliki `.up.sql` dan `.down.sql`
+* Endpoint menggunakan authentication yang sesuai
+* Endpoint admin menggunakan role check
+* Ownership resource dicek di service layer
+* Error menggunakan sentinel error
+* `errors.Is(...)` digunakan untuk pengecekan error
+* Data sensitif tidak masuk ke log
+* Dokumen KTP tidak disimpan di public/static directory
+
+---
+
+# 22. Git Workflow
+
+Gunakan satu branch untuk satu fitur/domain.
+
+Contoh:
+
+```text
+feature/identity-verification
+feature/hospital-crud
+feature/access-request-flow
+feature/patient-qr
+feature/audit-blockchain
+```
+
+Sebelum membuat PR:
+
+```bash
+git status
+git pull origin main
+```
+
+Kemudian pastikan branch sudah berisi perubahan terbaru dari `main`.
+
+Hindari melakukan force push ke branch bersama kecuali sudah disepakati oleh tim.
+
+---
+
+# 23. Prinsip Penting Akesa
+
+Beberapa prinsip yang harus dipertahankan ketika menambahkan fitur baru:
+
+### 1. Authentication ≠ Identity Verification
+
+Clerk menjawab:
+
+```text
+Siapa yang login?
+```
+
+KTP verification menjawab:
+
+```text
+Apakah identitas pasien sudah diverifikasi?
+```
+
+---
+
+### 2. QR ≠ Permission
+
+QR hanya digunakan untuk membantu identifikasi pasien.
+
+```text
+QR
+ ≠
+Access Permission
+```
+
+Akses data tetap menggunakan:
+
+```text
+Access Request
+       ↓
+Patient Approval
+       ↓
+Approved Data Access
+```
+
+---
+
+### 3. Role ≠ Ownership
+
+Role hanya menentukan apakah user memiliki jenis akses tertentu.
+
+Tetap lakukan pengecekan bahwa resource memang milik user tersebut.
+
+---
+
+### 4. Data Minimization
+
+Rumah sakit hanya mendapatkan kategori data yang disetujui pasien.
+
+Contoh:
+
+```text
+IDENTITY
+```
+
+tidak otomatis memberikan:
+
+```text
+MEDICAL_BASIC
+INSURANCE
+EMERGENCY_CONTACT
+```
+
+---
+
+### 5. Sensitive Data Protection
+
+NIK dan data sensitif lainnya harus diperlakukan sebagai data sensitif.
+
+Jangan:
+
+```text
+log.Println(nik)
+```
+
+atau memasukkan data pribadi langsung ke audit chain/blockchain.
+
+---
+
+### 6. Auditability
+
+Aktivitas penting harus dapat ditelusuri melalui audit trail.
+
+Contoh:
+
+```text
+Profile Created
+Profile Updated
+Identity Verification
+Access Request
+Access Approved
+Access Rejected
+Access Revoked
+Patient Data Accessed
+QR Rotation
+```
+
+---
+
+## 24. Status Implementasi
+
+Secara garis besar backend Akesa saat ini memiliki komponen:
+
+```text
+[✓] Clerk Authentication
+[✓] User Synchronization
+[✓] Role-based Authorization
+[✓] Patient Profile
+[✓] Hospital Management
+[✓] Hospital Staff
+[✓] Access Request
+[✓] Patient Consent
+[✓] Patient QR Credential
+[✓] Identity Verification Flow
+[✓] KTP Document Upload
+[✓] Manual Identity Review
+[✓] Sensitive Field Encryption
+[✓] NIK Hashing
+[✓] Audit Hash Chain
+[✓] Audit Chain Integrity Verification
+[✓] Hybrid Blockchain PoC
+```
+
+Identity verification otomatis seperti:
+
+```text
+KTP OCR
+Liveness Detection
+Face Matching
+Automatic Data Matching
+```
+
+masih bergantung pada implementasi provider/verification pipeline dan belum boleh dianggap aktif hanya karena field/status tersebut tersedia di database.
+
+---
+
+# 25. Prinsip Arsitektur
+
+Secara keseluruhan:
+
+```text
+                         ┌──────────────┐
+                         │    Clerk     │
+                         │     Auth     │
+                         └──────┬───────┘
+                                │
+                                ▼
+┌──────────────┐        ┌───────────────┐
+│ Flutter App  │ ─────► │  Go Backend   │
+└──────────────┘        └───────┬───────┘
+                                │
+             ┌──────────────────┼──────────────────┐
+             │                  │                  │
+             ▼                  ▼                  ▼
+       Patient Domain     Hospital Domain     Identity
+             │                  │              Verification
+             │                  │                  │
+             └──────────────────┼──────────────────┘
+                                │
+                                ▼
+                         Access / Consent
+                                │
+                                ▼
+                           Audit Service
+                                │
+                    ┌───────────┴───────────┐
+                    ▼                       ▼
+               PostgreSQL             Blockchain
+               Hash Chain                PoC
+```
+
+Tujuan akhirnya adalah menjaga agar data pasien tetap berada di bawah kontrol pasien, sementara rumah sakit hanya mendapatkan data yang memang diperlukan dan telah mendapatkan permission.
