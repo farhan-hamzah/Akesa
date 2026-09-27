@@ -25,6 +25,8 @@ type Profile struct {
 	PhoneNumber           string    `json:"phoneNumber"`
 	Address               string    `json:"address"`
 	BloodType             *string   `json:"bloodType,omitempty"`
+	DrugAllergy           *string   `json:"drugAllergy,omitempty"`
+	MedicalHistory        *string   `json:"medicalHistory,omitempty"`
 	InsuranceNumber       *string   `json:"insuranceNumber,omitempty"`
 	EmergencyContactName  *string   `json:"emergencyContactName,omitempty"`
 	EmergencyContactPhone *string   `json:"emergencyContactPhone,omitempty"`

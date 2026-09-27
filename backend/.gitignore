@@ -2,8 +2,12 @@
 .env.*
 !.env.example
 
+
 bin/
 tmp/
+storage/
+storage/identity/*
+!storage/identity/.gitkeep
 
 *.log
 

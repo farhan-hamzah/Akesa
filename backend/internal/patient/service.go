@@ -89,6 +89,8 @@ func (s *Service) hashProfile(p *Profile) string {
 		p.PhoneNumber + "|" +
 		p.Address + "|" +
 		derefOrEmpty(p.BloodType) + "|" +
+		derefOrEmpty(p.DrugAllergy) + "|" +
+		derefOrEmpty(p.MedicalHistory) + "|" +
 		derefOrEmpty(p.InsuranceNumber) + "|" +
 		derefOrEmpty(p.EmergencyContactName) + "|" +
 		derefOrEmpty(p.EmergencyContactPhone)

@@ -6,13 +6,15 @@ import (
 )
 
 type ProfileInput struct {
-	FullName              string
-	NIK                   string
+	FullName              *string
+	NIK                   *string
 	DateOfBirth           time.Time
 	Gender                Gender
-	PhoneNumber           string
-	Address               string
+	PhoneNumber           *string
+	Address               *string
 	BloodType             *string
+	DrugAllergy           *string
+	MedicalHistory        *string
 	InsuranceNumber       *string
 	EmergencyContactName  *string
 	EmergencyContactPhone *string
@@ -26,6 +28,8 @@ type ProfileRequest struct {
 	PhoneNumber           string  `json:"phoneNumber"`
 	Address               string  `json:"address"`
 	BloodType             *string `json:"bloodType,omitempty"`
+	DrugAllergy           *string `json:"drugAllergy,omitempty"`
+	MedicalHistory        *string `json:"medicalHistory,omitempty"`
 	InsuranceNumber       *string `json:"insuranceNumber,omitempty"`
 	EmergencyContactName  *string `json:"emergencyContactName,omitempty"`
 	EmergencyContactPhone *string `json:"emergencyContactPhone,omitempty"`
@@ -40,37 +44,64 @@ func (req ProfileRequest) Validate() (ProfileInput, error) {
 	if fullName == "" {
 		return ProfileInput{}, fieldErr("fullName", "wajib diisi")
 	}
+
 	if len(nik) != 16 {
-		return ProfileInput{}, fieldErr("nik", "harus terdiri dari 16 digit")
-	}
-	if phone == "" {
-		return ProfileInput{}, fieldErr("phoneNumber", "wajib diisi")
-	}
-	if address == "" {
-		return ProfileInput{}, fieldErr("address", "wajib diisi")
+		return ProfileInput{}, fieldErr(
+			"nik",
+			"harus terdiri dari 16 digit",
+		)
 	}
 
-	gender := Gender(strings.ToUpper(strings.TrimSpace(req.Gender)))
+	if phone == "" {
+		return ProfileInput{}, fieldErr(
+			"phoneNumber",
+			"wajib diisi",
+		)
+	}
+
+	if address == "" {
+		return ProfileInput{}, fieldErr(
+			"address",
+			"wajib diisi",
+		)
+	}
+
+	gender := Gender(
+		strings.ToUpper(strings.TrimSpace(req.Gender)),
+	)
+
 	if gender != GenderMale && gender != GenderFemale {
-		return ProfileInput{}, fieldErr("gender", "harus MALE atau FEMALE")
+		return ProfileInput{}, fieldErr(
+			"gender",
+			"harus MALE atau FEMALE",
+		)
 	}
 
 	dob, err := time.Parse("2006-01-02", req.DateOfBirth)
 	if err != nil {
-		return ProfileInput{}, fieldErr("dateOfBirth", "format harus YYYY-MM-DD")
+		return ProfileInput{}, fieldErr(
+			"dateOfBirth",
+			"format harus YYYY-MM-DD",
+		)
 	}
+
 	if dob.After(time.Now()) {
-		return ProfileInput{}, fieldErr("dateOfBirth", "tidak boleh di masa depan")
+		return ProfileInput{}, fieldErr(
+			"dateOfBirth",
+			"tidak boleh di masa depan",
+		)
 	}
 
 	return ProfileInput{
-		FullName:              fullName,
-		NIK:                   nik,
+		FullName:              &fullName,
+		NIK:                   &nik,
 		DateOfBirth:           dob,
 		Gender:                gender,
-		PhoneNumber:           phone,
-		Address:               address,
+		PhoneNumber:           &phone,
+		Address:               &address,
 		BloodType:             trimPtr(req.BloodType),
+		DrugAllergy:           trimPtr(req.DrugAllergy),
+		MedicalHistory:        trimPtr(req.MedicalHistory),
 		InsuranceNumber:       trimPtr(req.InsuranceNumber),
 		EmergencyContactName:  trimPtr(req.EmergencyContactName),
 		EmergencyContactPhone: trimPtr(req.EmergencyContactPhone),
@@ -81,15 +112,21 @@ func trimPtr(s *string) *string {
 	if s == nil {
 		return nil
 	}
+
 	trimmed := strings.TrimSpace(*s)
+
 	if trimmed == "" {
 		return nil
 	}
+
 	return &trimmed
 }
 
 func fieldErr(field, message string) error {
-	return &ValidationError{Field: field, Message: message}
+	return &ValidationError{
+		Field:   field,
+		Message: message,
+	}
 }
 
 type ValidationError struct {

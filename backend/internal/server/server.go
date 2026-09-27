@@ -9,6 +9,7 @@ import (
 	"github.com/farhan-hamzah/Akesa/backend/internal/hospital"
 	appmiddleware "github.com/farhan-hamzah/Akesa/backend/internal/middleware"
 	"github.com/farhan-hamzah/Akesa/backend/internal/patient"
+	identity "github.com/farhan-hamzah/Akesa/backend/internal/patient/identify"
 	"github.com/farhan-hamzah/Akesa/backend/internal/patientqr"
 	"github.com/farhan-hamzah/Akesa/backend/internal/user"
 )
@@ -20,16 +21,15 @@ const (
 )
 
 type Dependencies struct {
-	UserLoader auth.UserLoader
-
+	UserLoader       auth.UserLoader
 	UserHandler      *user.Handler
 	PatientHandler   *patient.Handler
+	IdentityHandler  *identity.Handler
 	HospitalHandler  *hospital.Handler
 	AccessHandler    *access.Handler
 	AuditHandler     *audit.Handler
 	PatientQRHandler *patientqr.Handler
 }
-
 type Server struct {
 	mux *http.ServeMux
 }
@@ -70,6 +70,24 @@ func (s *Server) registerRoutes(deps Dependencies) {
 	)
 	s.mux.Handle("PUT /api/v1/patient/profile",
 		s.chain(deps, http.HandlerFunc(deps.PatientHandler.UpdateProfile), RolePatient),
+	)
+	s.mux.Handle("POST /api/v1/patient/identity/verifications",
+		s.chain(deps, http.HandlerFunc(deps.IdentityHandler.CreateVerification), RolePatient),
+	)
+	s.mux.Handle("GET /api/v1/patient/identity/verifications/{id}",
+		s.chain(deps, http.HandlerFunc(deps.IdentityHandler.GetVerification), RolePatient),
+	)
+	s.mux.Handle("GET /api/v1/patient/identity/verifications/latest",
+		s.chain(deps, http.HandlerFunc(deps.IdentityHandler.GetLatestVerification), RolePatient),
+	)
+	s.mux.Handle("POST /api/v1/patient/identity/verifications/{id}/document",
+		s.chain(deps, http.HandlerFunc(deps.IdentityHandler.UploadDocument), RolePatient),
+	)
+	s.mux.Handle("POST /api/v1/admin/identity-verifications/{id}/approve",
+		s.chain(deps, http.HandlerFunc(deps.IdentityHandler.ApproveVerification), RoleAdmin),
+	)
+	s.mux.Handle("POST /api/v1/admin/identity-verifications/{id}/reject",
+		s.chain(deps, http.HandlerFunc(deps.IdentityHandler.RejectVerification), RoleAdmin),
 	)
 	s.mux.Handle("GET /api/v1/patient/access-requests",
 		s.chain(deps, http.HandlerFunc(deps.AccessHandler.ListMine), RolePatient),

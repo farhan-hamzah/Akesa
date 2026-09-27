@@ -17,6 +17,8 @@ import (
 	"github.com/farhan-hamzah/Akesa/backend/internal/database"
 	"github.com/farhan-hamzah/Akesa/backend/internal/hospital"
 	"github.com/farhan-hamzah/Akesa/backend/internal/patient"
+	identity "github.com/farhan-hamzah/Akesa/backend/internal/patient/identify"
+	"github.com/farhan-hamzah/Akesa/backend/internal/patient/storage"
 	"github.com/farhan-hamzah/Akesa/backend/internal/patientqr"
 	"github.com/farhan-hamzah/Akesa/backend/internal/server"
 	"github.com/farhan-hamzah/Akesa/backend/internal/user"
@@ -71,6 +73,14 @@ func main() {
 	patientService := patient.NewService(patientRepository, auditService, auditHasher)
 	patientHandler := patient.NewHandler(patientService)
 
+	identityStorage, err := storage.NewLocalStorage("storage/identity")
+	if err != nil {
+		log.Fatalf("failed to initialize identity storage: %v", err)
+	}
+	identityRepository := identity.NewRepository(db)
+	identityService := identity.NewService(identityRepository, patientService, identityStorage)
+	identityHandler := identity.NewHandler(identityService)
+
 	patientQRRepository := patientqr.NewRepository(db)
 	patientQRService := patientqr.NewService(patientQRRepository)
 	patientQRHandler := patientqr.NewHandler(patientQRService)
@@ -91,6 +101,7 @@ func main() {
 		AccessHandler:    accessHandler,
 		AuditHandler:     auditHandler,
 		PatientQRHandler: patientQRHandler,
+		IdentityHandler:  identityHandler,
 	})
 
 	addr := ":" + cfg.Port

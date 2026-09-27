@@ -9,6 +9,22 @@ CREATE TABLE patient_profiles (
     phone_number VARCHAR(30) NOT NULL,
     address TEXT NOT NULL,
     blood_type VARCHAR(5),
+    CONSTRAINT patient_profiles_blood_type_check
+    CHECK (
+        blood_type IS NULL
+        OR blood_type IN (
+            'A+',
+            'A-',
+            'B+',
+            'B-',
+            'AB+',
+            'AB-',
+            'O+',
+            'O-'
+        )
+    ),
+    drug_allergy TEXT,
+    medical_history TEXT,
     insurance_number VARCHAR(100),
     emergency_contact_name VARCHAR(255),
     emergency_contact_phone VARCHAR(30),
@@ -16,5 +32,8 @@ CREATE TABLE patient_profiles (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_patient_profiles_patient_code ON patient_profiles(patient_code);
-CREATE INDEX idx_patient_profiles_nik ON patient_profiles(nik);
+CREATE INDEX idx_patient_profiles_patient_code
+    ON patient_profiles(patient_code);
+
+CREATE INDEX idx_patient_profiles_nik
+    ON patient_profiles(nik);
