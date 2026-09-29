@@ -1,0 +1,32 @@
+# Binaries & executables
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+backend/backend.exe
+backend/ktp-backend.exe
+
+# Python & Environment
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+venv/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Model Weights (heavy files, ~2GB total)
+ai-service/weights/*.pth
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+desktop.ini
+*.ini
+.vscode/
+.idea/
