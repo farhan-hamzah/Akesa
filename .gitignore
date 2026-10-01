@@ -13,5 +13,7 @@ AGENTS.md
 # OS and IDE files
 .DS_Store
 Thumbs.db
+desktop.ini
+*.ini
 .vscode/
 .idea/
