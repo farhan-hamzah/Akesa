@@ -23,6 +23,10 @@ type Config struct {
 	BlockchainRPCURL          string
 	BlockchainContractAddress string
 	BlockchainFromAddress     string
+
+	// MagicLinkBaseURL is the base URL/scheme used to construct invitation magic links.
+	// e.g. "akesa://register-hospital" or "https://app.akesa.id/register-hospital"
+	MagicLinkBaseURL string
 }
 
 func Load() (*Config, error) {
@@ -36,6 +40,11 @@ func Load() (*Config, error) {
 		BlockchainRPCURL:          os.Getenv("BLOCKCHAIN_RPC_URL"),
 		BlockchainContractAddress: os.Getenv("BLOCKCHAIN_CONTRACT_ADDRESS"),
 		BlockchainFromAddress:     os.Getenv("BLOCKCHAIN_FROM_ADDRESS"),
+		MagicLinkBaseURL:          os.Getenv("APP_MAGIC_LINK_BASE_URL"),
+	}
+
+	if config.MagicLinkBaseURL == "" {
+		config.MagicLinkBaseURL = "akesa://register-hospital"
 	}
 
 	if config.AppEnv == "" {

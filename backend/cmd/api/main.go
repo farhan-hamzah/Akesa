@@ -86,7 +86,7 @@ func main() {
 	patientQRHandler := patientqr.NewHandler(patientQRService)
 
 	hospitalRepository := hospital.NewRepository(db)
-	hospitalService := hospital.NewService(hospitalRepository, userService)
+	hospitalService := hospital.NewService(hospitalRepository, userService, cfg.MagicLinkBaseURL)
 	hospitalHandler := hospital.NewHandler(hospitalService)
 
 	accessRepository := access.NewRepository(db)

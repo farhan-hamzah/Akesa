@@ -133,7 +133,10 @@ Migration saat ini mencakup:
 000006_create_access_requests
 000007_create_audit_logs
 000008_encrypt_sensitive_fields
+000008_add_hospital_registration_fields
 000009_create_patient_qr_credentials
+000009_create_hospital_invitations
+000010_create_hospital_applications
 ```
 
 ---
@@ -942,9 +945,9 @@ status
 
 ---
 
-# 12. Hospital
+# 12. Hospital & Registration Flow
 
-## `GET /api/v1/hospitals`
+## 12.1. `GET /api/v1/hospitals`
 
 Menampilkan rumah sakit dengan status:
 
@@ -959,6 +962,156 @@ curl \
 ```
 
 Endpoint ini digunakan pasien atau user yang sudah terdaftar untuk melihat rumah sakit yang tersedia.
+
+---
+
+## 12.2. `GET /api/v1/hospitals/invitations/validate`
+
+Memvalidasi kode undangan registrasi rumah sakit sebelum form pendaftaran dibuka di sisi client.
+
+Query parameter:
+
+| Parameter | Tipe     | Keterangan                               |
+| --------- | -------- | ---------------------------------------- |
+| `key`     | `string` | Kode undangan (format: `AKESA-XXXX-XXXX`) |
+
+Contoh:
+
+```bash
+curl "http://localhost:8080/api/v1/hospitals/invitations/validate?key=AKESA-7X9K-3B2M" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Response jika valid (HTTP 200 OK):
+
+```json
+{
+  "valid": true,
+  "targetEmail": "kontak@sardjito.co.id",
+  "expiresAt": "2026-10-04T22:46:52Z"
+}
+```
+
+Status error yang dapat terjadi:
+* `400 Bad Request`: `key_query_param_required`
+* `404 Not Found`: `invitation_not_found`
+* `409 Conflict`: `invitation_already_used` (kode sudah pernah digunakan)
+* `410 Gone`: `invitation_expired` (masa berlaku kode telah kedaluwarsa)
+
+---
+
+## 12.3. `POST /api/v1/hospitals/register`
+
+Mengirim formulir pendaftaran rumah sakit menggunakan kode undangan yang valid.
+
+Data pendaftaran akan masuk ke tabel staging `hospital_applications` dengan status awal:
+
+```text
+PENDING_REVIEW
+```
+
+Kode undangan otomatis ditandai terpakai (`is_used = true`). Role user tetap `PATIENT` sampai permohonan disetujui oleh Admin.
+
+Contoh:
+
+```bash
+curl -X POST \
+  http://localhost:8080/api/v1/hospitals/register \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyCode": "AKESA-7X9K-3B2M",
+    "name": "RSUP Dr. Sardjito",
+    "address": "Jl. Kesehatan No. 1, Sleman, DIY",
+    "phone": "0274-587333",
+    "email": "kontak@sardjito.co.id",
+    "registrationNumber": "3471012",
+    "npwp": "01.234.567.8-901.000",
+    "licenseDocumentUrl": "https://storage.akesa.id/docs/izin-sardjito.pdf",
+    "picPosition": "Kepala Instalasi Rekam Medis",
+    "picFullName": "dr. Budi Santoso"
+  }'
+```
+
+Response (HTTP 201 Created):
+
+```json
+{
+  "id": "8ed55912-0760-43ae-9ba4-bc2d2da285cd",
+  "invitationId": "c4d3e2f1-...",
+  "applicantUserId": "a1b2c3d4-...",
+  "name": "RSUP Dr. Sardjito",
+  "address": "Jl. Kesehatan No. 1, Sleman, DIY",
+  "phone": "0274-587333",
+  "email": "kontak@sardjito.co.id",
+  "registrationNumber": "3471012",
+  "npwp": "01.234.567.8-901.000",
+  "licenseDocumentUrl": "https://storage.akesa.id/docs/izin-sardjito.pdf",
+  "picFullName": "dr. Budi Santoso",
+  "picPosition": "Kepala Instalasi Rekam Medis",
+  "status": "PENDING_REVIEW",
+  "adminNotes": "",
+  "createdAt": "2026-10-01T22:48:19Z",
+  "updatedAt": "2026-10-01T22:48:19Z"
+}
+```
+
+---
+
+## 12.4. `GET /api/v1/hospitals/my-application`
+
+Melihat status formulir permohonan pendaftaran rumah sakit milik user yang sedang login, beserta catatan/alasan dari Admin jika ada.
+
+Contoh:
+
+```bash
+curl \
+  http://localhost:8080/api/v1/hospitals/my-application \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Response menampilkan detail data `hospital_applications` beserta field `status` dan `adminNotes`.
+
+---
+
+## 12.5. `PUT /api/v1/hospitals/my-application`
+
+Mengirim pembaruan data/dokumen ketika permohonan berada dalam status:
+
+```text
+REVISION_REQUIRED
+```
+
+Setelah pelamar berhasil mengirim revisi, status permohonan otomatis kembali menjadi:
+
+```text
+PENDING_REVIEW
+```
+
+sehingga Admin dapat meninjau ulang kelengkapan permohonan.
+
+Contoh:
+
+```bash
+curl -X PUT \
+  http://localhost:8080/api/v1/hospitals/my-application \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "RSUP Dr. Sardjito",
+    "address": "Jl. Kesehatan No. 1, Sleman, DIY",
+    "phone": "0274-587333",
+    "email": "kontak@sardjito.co.id",
+    "registrationNumber": "3471012",
+    "npwp": "01.234.567.8-901.000",
+    "licenseDocumentUrl": "https://storage.akesa.id/docs/izin-sardjito-revisi-hd.pdf",
+    "picPosition": "Kepala Instalasi Rekam Medis",
+    "picFullName": "dr. Budi Santoso"
+  }'
+```
+
+Jika status saat ini bukan `REVISION_REQUIRED`, endpoint mengembalikan error:
+* `409 Conflict`: `application_not_revision_required`
 
 ---
 
@@ -1240,6 +1393,184 @@ curl -X POST \
 
 ---
 
+## `POST /api/v1/admin/hospitals/invitations`
+
+Menghasilkan kode undangan pendaftaran sekali pakai dan tautan magic link (deep link mobile) untuk calon perwakilan rumah sakit.
+
+Contoh:
+
+```bash
+curl -X POST \
+  http://localhost:8080/api/v1/admin/hospitals/invitations \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "kontak@sardjito.co.id",
+    "expiresInHours": 72
+  }'
+```
+
+Response (HTTP 201 Created):
+
+```json
+{
+  "keyCode": "AKESA-7X9K-3B2M",
+  "magicLink": "akesa://register-hospital?key=AKESA-7X9K-3B2M",
+  "targetEmail": "kontak@sardjito.co.id",
+  "expiresAt": "2026-10-04T22:46:52Z"
+}
+```
+
+Jika `expiresInHours` tidak diisi atau `<= 0`, masa berlaku default adalah 72 jam (3 hari).
+
+---
+
+## 16.1. Alur Peninjauan Permohonan Rumah Sakit (Application Review)
+
+Formulir yang dikirimkan calon perwakilan rumah sakit masuk ke tabel staging `hospital_applications` menggunakan native PostgreSQL enum `hospital_application_status`:
+
+| Status              | Keterangan                                                              |
+| ------------------- | ----------------------------------------------------------------------- |
+| `PENDING_REVIEW`    | Permohonan baru disubmit, menunggu pemeriksaan oleh Admin               |
+| `REVISION_REQUIRED` | Admin meminta perbaikan data/dokumen; pelamar dapat mengedit permohonan |
+| `REJECTED`          | Permohonan ditolak permanen; kunci hangus dan form terkunci             |
+| `APPROVED`          | Permohonan disetujui; RS aktif, akun staf dibuat, role dinaikkan        |
+
+Siklus transisi status permohonan:
+
+```text
+       [Applicant Submit Form]
+                  │
+                  ▼
+          PENDING_REVIEW ◄──────────────────────┐
+                  │                             │
+                  ├───► request-revision        │
+                  │           │                 │
+                  │           ▼                 │
+                  │     REVISION_REQUIRED       │
+                  │           │                 │
+                  │     [Applicant Update PUT] ─┘
+                  │
+                  ├───► reject
+                  │           │
+                  │           ▼
+                  │        REJECTED (Kunci hangus)
+                  │
+                  └───► approve
+                              │
+                              ▼
+                           APPROVED
+                              │
+                              ├─► Salin data RS ke tabel `hospitals` (ACTIVE)
+                              ├─► Catat relasi staf di tabel `hospital_staff`
+                              └─► Promosikan role user menjadi `HOSPITAL_STAFF`
+```
+
+---
+
+## `GET /api/v1/admin/hospital-applications`
+
+Menampilkan daftar seluruh permohonan pendaftaran rumah sakit.
+
+Query parameter (opsional):
+
+| Parameter | Tipe     | Pilihan Nilai                                                  |
+| --------- | -------- | -------------------------------------------------------------- |
+| `status`  | `string` | `PENDING_REVIEW`, `REVISION_REQUIRED`, `REJECTED`, `APPROVED` |
+
+Contoh:
+
+```bash
+curl "http://localhost:8080/api/v1/admin/hospital-applications?status=PENDING_REVIEW" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+## `GET /api/v1/admin/hospital-applications/{id}`
+
+Menampilkan detail satu formulir permohonan pendaftaran rumah sakit.
+
+Contoh:
+
+```bash
+curl \
+  http://localhost:8080/api/v1/admin/hospital-applications/<applicationId> \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+## `POST /api/v1/admin/hospital-applications/{id}/request-revision`
+
+Meminta perbaikan data atau dokumen kepada pelamar dengan catatan instruksi wajib.
+
+Contoh:
+
+```bash
+curl -X POST \
+  http://localhost:8080/api/v1/admin/hospital-applications/<applicationId>/request-revision \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "notes": "Dokumen surat izin operasional tidak terbaca jelas. Mohon upload ulang hasil scan resolusi tinggi."
+  }'
+```
+
+Status permohonan akan berubah menjadi:
+
+```text
+REVISION_REQUIRED
+```
+
+---
+
+## `POST /api/v1/admin/hospital-applications/{id}/reject`
+
+Menolak permohonan pendaftaran rumah sakit secara permanen dengan alasan penolakan wajib.
+
+Contoh:
+
+```bash
+curl -X POST \
+  http://localhost:8080/api/v1/admin/hospital-applications/<applicationId>/reject \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "notes": "Nomor izin operasional rumah sakit tidak terdaftar pada Kementerian Kesehatan."
+  }'
+```
+
+Status permohonan akan berubah menjadi:
+
+```text
+REJECTED
+```
+
+Permohonan ini tidak dapat diedit kembali dan kode undangan dianggap hangus secara permanen.
+
+---
+
+## `POST /api/v1/admin/hospital-applications/{id}/approve`
+
+Menyetujui pendaftaran rumah sakit.
+
+Contoh:
+
+```bash
+curl -X POST \
+  http://localhost:8080/api/v1/admin/hospital-applications/<applicationId>/approve \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Dalam satu transaksi database atomik:
+1. Status permohonan diubah menjadi `APPROVED`.
+2. Data rumah sakit disalin ke tabel operasional `hospitals` dengan status `ACTIVE`.
+3. User pelamar dicatat sebagai penanggung jawab rumah sakit pada tabel `hospital_staff`.
+4. Role user pelamar dinaikkan dari `PATIENT` menjadi `HOSPITAL_STAFF`.
+
+---
+
 # 17. Patient QR Credential
 
 QR digunakan sebagai credential untuk membantu proses identifikasi pasien.
@@ -1404,12 +1735,16 @@ New QR → active
 
 ## Authenticated User
 
-| Method | Endpoint                     | Keterangan            |
-| ------ | ---------------------------- | --------------------- |
-| `POST` | `/api/v1/users/sync`         | Sync Clerk user       |
-| `GET`  | `/api/v1/me`                 | Current user          |
-| `GET`  | `/api/v1/hospitals`          | List active hospitals |
-| `GET`  | `/api/v1/audit/verify-chain` | Verify audit chain    |
+| Method | Endpoint                                 | Keterangan                            |
+| ------ | ---------------------------------------- | ------------------------------------- |
+| `POST` | `/api/v1/users/sync`                     | Sync Clerk user                       |
+| `GET`  | `/api/v1/me`                             | Current user                          |
+| `GET`  | `/api/v1/hospitals`                      | List active hospitals                 |
+| `GET`  | `/api/v1/hospitals/invitations/validate` | Validasi kode undangan RS             |
+| `POST` | `/api/v1/hospitals/register`             | Registrasi formulir RS via invitation |
+| `GET`  | `/api/v1/hospitals/my-application`       | Cek status permohonan RS pelamar      |
+| `PUT`  | `/api/v1/hospitals/my-application`       | Submit ulang revisi permohonan RS     |
+| `GET`  | `/api/v1/audit/verify-chain`             | Verify audit chain                    |
 
 ## Patient
 
@@ -1440,16 +1775,22 @@ New QR → active
 
 ## Admin
 
-| Method  | Endpoint                                            | Keterangan               |
-| ------- | --------------------------------------------------- | ------------------------ |
-| `POST`  | `/api/v1/admin/hospitals`                           | Create hospital          |
-| `GET`   | `/api/v1/admin/hospitals`                           | List all hospitals       |
-| `PATCH` | `/api/v1/admin/hospitals/{id}/verify`               | Verify hospital          |
-| `PATCH` | `/api/v1/admin/hospitals/{id}/activate`             | Activate hospital        |
-| `PATCH` | `/api/v1/admin/hospitals/{id}/deactivate`           | Deactivate hospital      |
-| `POST`  | `/api/v1/admin/hospitals/{id}/staff`                | Assign hospital staff    |
-| `POST`  | `/api/v1/admin/identity-verifications/{id}/approve` | Approve KTP verification |
-| `POST`  | `/api/v1/admin/identity-verifications/{id}/reject`  | Reject KTP verification  |
+| Method  | Endpoint                                                    | Keterangan                               |
+| ------- | ----------------------------------------------------------- | ---------------------------------------- |
+| `POST`  | `/api/v1/admin/hospitals`                                   | Create hospital                          |
+| `GET`   | `/api/v1/admin/hospitals`                                   | List all hospitals                       |
+| `PATCH` | `/api/v1/admin/hospitals/{id}/verify`                       | Verify hospital                          |
+| `PATCH` | `/api/v1/admin/hospitals/{id}/activate`                     | Activate hospital                        |
+| `PATCH` | `/api/v1/admin/hospitals/{id}/deactivate`                   | Deactivate hospital                      |
+| `POST`  | `/api/v1/admin/hospitals/{id}/staff`                        | Assign hospital staff                    |
+| `POST`  | `/api/v1/admin/hospitals/invitations`                       | Generate invitation key & magic link     |
+| `GET`   | `/api/v1/admin/hospital-applications`                       | List permohonan pendaftaran RS           |
+| `GET`   | `/api/v1/admin/hospital-applications/{id}`                  | Detail permohonan pendaftaran RS         |
+| `POST`  | `/api/v1/admin/hospital-applications/{id}/request-revision` | Minta revisi permohonan pendaftaran RS   |
+| `POST`  | `/api/v1/admin/hospital-applications/{id}/reject`           | Tolak permohonan pendaftaran RS          |
+| `POST`  | `/api/v1/admin/hospital-applications/{id}/approve`          | Setujui permohonan RS & promosi role PIC |
+| `POST`  | `/api/v1/admin/identity-verifications/{id}/approve`         | Approve KTP verification                 |
+| `POST`  | `/api/v1/admin/identity-verifications/{id}/reject`          | Reject KTP verification                  |
 
 ---
 
@@ -1662,6 +2003,8 @@ Secara garis besar backend Akesa saat ini memiliki komponen:
 [✓] Role-based Authorization
 [✓] Patient Profile
 [✓] Hospital Management
+[✓] Hospital Invitation Key & Magic Link
+[✓] Hospital Application Staging & Admin Review (Revision / Reject / Approve)
 [✓] Hospital Staff
 [✓] Access Request
 [✓] Patient Consent

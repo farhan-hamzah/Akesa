@@ -61,7 +61,20 @@ func (s *Server) registerRoutes(deps Dependencies) {
 	s.mux.Handle("GET /api/v1/hospitals",
 		s.chain(deps, http.HandlerFunc(deps.HospitalHandler.ListActive)),
 	)
+	s.mux.Handle("GET /api/v1/hospitals/invitations/validate",
+		s.chain(deps, http.HandlerFunc(deps.HospitalHandler.ValidateInvitation)),
+	)
+	s.mux.Handle("POST /api/v1/hospitals/register",
+		s.chain(deps, http.HandlerFunc(deps.HospitalHandler.RegisterWithKey)),
+	)
+	s.mux.Handle("GET /api/v1/hospitals/my-application",
+		s.chain(deps, http.HandlerFunc(deps.HospitalHandler.GetMyApplication)),
+	)
+	s.mux.Handle("PUT /api/v1/hospitals/my-application",
+		s.chain(deps, http.HandlerFunc(deps.HospitalHandler.ResubmitApplication)),
+	)
 
+	// --- Patient routes ---
 	s.mux.Handle("GET /api/v1/patient/profile",
 		s.chain(deps, http.HandlerFunc(deps.PatientHandler.GetMyProfile), RolePatient),
 	)
@@ -115,9 +128,7 @@ func (s *Server) registerRoutes(deps Dependencies) {
 		s.chain(deps, http.HandlerFunc(deps.AccessHandler.FetchData), RoleStaff),
 	)
 
-	s.mux.Handle("POST /api/v1/admin/hospitals",
-		s.chain(deps, http.HandlerFunc(deps.HospitalHandler.Create), RoleAdmin),
-	)
+	// --- Admin routes ---
 	s.mux.Handle("GET /api/v1/admin/hospitals",
 		s.chain(deps, http.HandlerFunc(deps.HospitalHandler.List), RoleAdmin),
 	)
@@ -132,6 +143,24 @@ func (s *Server) registerRoutes(deps Dependencies) {
 	)
 	s.mux.Handle("POST /api/v1/admin/hospitals/{id}/staff",
 		s.chain(deps, http.HandlerFunc(deps.HospitalHandler.AddStaff), RoleAdmin),
+	)
+	s.mux.Handle("POST /api/v1/admin/hospitals/invitations",
+		s.chain(deps, http.HandlerFunc(deps.HospitalHandler.GenerateInvitation), RoleAdmin),
+	)
+	s.mux.Handle("GET /api/v1/admin/hospital-applications",
+		s.chain(deps, http.HandlerFunc(deps.HospitalHandler.ListApplications), RoleAdmin),
+	)
+	s.mux.Handle("GET /api/v1/admin/hospital-applications/{id}",
+		s.chain(deps, http.HandlerFunc(deps.HospitalHandler.GetApplication), RoleAdmin),
+	)
+	s.mux.Handle("POST /api/v1/admin/hospital-applications/{id}/request-revision",
+		s.chain(deps, http.HandlerFunc(deps.HospitalHandler.RequestRevision), RoleAdmin),
+	)
+	s.mux.Handle("POST /api/v1/admin/hospital-applications/{id}/reject",
+		s.chain(deps, http.HandlerFunc(deps.HospitalHandler.RejectApplication), RoleAdmin),
+	)
+	s.mux.Handle("POST /api/v1/admin/hospital-applications/{id}/approve",
+		s.chain(deps, http.HandlerFunc(deps.HospitalHandler.ApproveApplication), RoleAdmin),
 	)
 	s.mux.Handle("GET /api/v1/patient/qr",
 		s.chain(deps, http.HandlerFunc(deps.PatientQRHandler.Get), RolePatient),
