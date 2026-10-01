@@ -5,9 +5,9 @@
 
 bin/
 tmp/
-storage/
-storage/identity/*
-!storage/identity/.gitkeep
+/storage/
+/storage/identity/*
+!/storage/identity/.gitkeep
 
 *.log
 
