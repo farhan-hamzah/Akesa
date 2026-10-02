@@ -74,3 +74,8 @@ func GetAuthUser(r *http.Request) (*AuthUser, bool) {
 	u, ok := r.Context().Value(authUserContextKey).(*AuthUser)
 	return u, ok
 }
+
+// WithAuthUser attaches an AuthUser directly into context (useful in handlers and unit tests).
+func WithAuthUser(ctx context.Context, u *AuthUser) context.Context {
+	return context.WithValue(ctx, authUserContextKey, u)
+}

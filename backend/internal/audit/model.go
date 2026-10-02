@@ -12,7 +12,8 @@ const (
 	ActionAccessApproved  = "ACCESS_APPROVED"
 	ActionAccessRejected  = "ACCESS_REJECTED"
 	ActionAccessRevoked   = "ACCESS_REVOKED"
-	ActionDataAccessed    = "DATA_ACCESSED"
+	ActionDataAccessed              = "DATA_ACCESSED"
+	ActionIntegrityViolationBlocked = "INTEGRITY_VIOLATION_BLOCKED"
 )
 
 type Log struct {

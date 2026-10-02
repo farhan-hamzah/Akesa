@@ -123,6 +123,14 @@ func (s *Service) History(ctx context.Context, entityType string, entityID uuid.
 	return s.repository.ListByEntity(ctx, entityType, entityID)
 }
 
+func (s *Service) SecurityAlerts(ctx context.Context, limit, offset int) ([]*Log, int, error) {
+	return s.repository.ListSecurityAlerts(ctx, limit, offset)
+}
+
+func (s *Service) PatientTimeline(ctx context.Context, patientID uuid.UUID) ([]*Log, error) {
+	return s.repository.ListPatientTimeline(ctx, patientID)
+}
+
 func (s *Service) VerifyChainIntegrity(ctx context.Context) (bool, int, error) {
 	return s.repository.VerifyChainIntegrity(ctx)
 }

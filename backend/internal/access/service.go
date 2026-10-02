@@ -67,8 +67,9 @@ func (s *Service) CreateRequest(ctx context.Context, staffUserID uuid.UUID, in C
 	}
 
 	s.recordEvent(ctx, req.ID, actionRequested, staffUserID, map[string]any{
-		"hospitalId": staff.HospitalID,
+		"hospitalId": staff.HospitalID.String(),
 		"categories": in.Categories,
+		"patientId":  patientProfile.ID.String(),
 	})
 
 	return req, nil
@@ -97,7 +98,11 @@ func (s *Service) Approve(ctx context.Context, patientID, requestID uuid.UUID) (
 		return nil, err
 	}
 
-	s.recordEvent(ctx, updated.ID, actionApproved, patientID, map[string]any{"categories": updated.Categories})
+	s.recordEvent(ctx, updated.ID, actionApproved, patientID, map[string]any{
+		"categories": updated.Categories,
+		"patientId":  updated.PatientID.String(),
+		"hospitalId": updated.HospitalID.String(),
+	})
 	return updated, nil
 }
 
@@ -112,7 +117,10 @@ func (s *Service) Reject(ctx context.Context, patientID, requestID uuid.UUID) (*
 		return nil, err
 	}
 
-	s.recordEvent(ctx, updated.ID, actionRejected, patientID, nil)
+	s.recordEvent(ctx, updated.ID, actionRejected, patientID, map[string]any{
+		"patientId":  updated.PatientID.String(),
+		"hospitalId": updated.HospitalID.String(),
+	})
 	return updated, nil
 }
 
@@ -133,7 +141,10 @@ func (s *Service) Revoke(ctx context.Context, patientID, requestID uuid.UUID) (*
 		return nil, err
 	}
 
-	s.recordEvent(ctx, updated.ID, actionRevoked, patientID, nil)
+	s.recordEvent(ctx, updated.ID, actionRevoked, patientID, map[string]any{
+		"patientId":  updated.PatientID.String(),
+		"hospitalId": updated.HospitalID.String(),
+	})
 	return updated, nil
 }
 
@@ -178,6 +189,9 @@ func (s *Service) FetchApprovedData(ctx context.Context, staffUserID, requestID 
 				"error":        "hash_mismatch",
 				"currentHash":  currentHash,
 				"recordedHash": recordedHash,
+				"patientId":    req.PatientID.String(),
+				"hospitalId":   req.HospitalID.String(),
+				"reason":       "Real-time patient profile hash does not match anchored ledger hash",
 			})
 			return nil, ErrDataTampered
 		}
@@ -188,6 +202,8 @@ func (s *Service) FetchApprovedData(ctx context.Context, staffUserID, requestID 
 	s.recordEvent(ctx, req.ID, actionAccessed, staffUserID, map[string]any{
 		"categories": req.Categories,
 		"dataHash":   currentHash,
+		"patientId":  req.PatientID.String(),
+		"hospitalId": req.HospitalID.String(),
 	})
 
 	return view, nil

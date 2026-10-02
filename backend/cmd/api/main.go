@@ -63,7 +63,6 @@ func main() {
 
 	auditRepository := audit.NewRepository(db)
 	auditService := audit.NewService(auditRepository, bcClient)
-	auditHandler := audit.NewHandler(auditService)
 
 	userRepository := user.NewRepository(db)
 	userService := user.NewService(userRepository)
@@ -72,6 +71,8 @@ func main() {
 	patientRepository := patient.NewRepository(db, fieldCipher, nikHasher)
 	patientService := patient.NewService(patientRepository, auditService, auditHasher)
 	patientHandler := patient.NewHandler(patientService)
+
+	auditHandler := audit.NewHandler(auditService, patientService)
 
 	identityStorage, err := storage.NewLocalStorage("storage/identity")
 	if err != nil {
