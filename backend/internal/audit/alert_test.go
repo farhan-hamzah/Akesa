@@ -117,3 +117,31 @@ func TestTamperAuditPayloadIntegrity(t *testing.T) {
 		t.Errorf("expected error hash_mismatch, got %v", parsed["error"])
 	}
 }
+
+func TestLogPayloadJSONSerialization(t *testing.T) {
+	logEntry := Log{
+		ID:         uuid.New(),
+		EntityType: "ACCESS_REQUEST",
+		Action:     "DATA_ACCESSED",
+		Payload:    json.RawMessage(`{"hospitalId":"123","categories":["IDENTITY"]}`),
+	}
+
+	bytes, err := json.Marshal(logEntry)
+	if err != nil {
+		t.Fatalf("failed to marshal log: %v", err)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(bytes, &raw); err != nil {
+		t.Fatalf("failed to unmarshal log JSON: %v", err)
+	}
+
+	payloadMap, ok := raw["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected payload to be a JSON object, but got: %T (%v)", raw["payload"], raw["payload"])
+	}
+
+	if payloadMap["hospitalId"] != "123" {
+		t.Errorf("expected hospitalId to be 123, got %v", payloadMap["hospitalId"])
+	}
+}
