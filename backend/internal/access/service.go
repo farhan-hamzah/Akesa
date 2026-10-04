@@ -13,6 +13,7 @@ import (
 type PatientLookup interface {
 	GetByPatientCode(ctx context.Context, patientCode string) (*patient.Profile, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*patient.Profile, error)
+	GetByUserID(ctx context.Context, userID uuid.UUID) (*patient.Profile, error)
 	ComputeHash(profile *patient.Profile) string
 }
 
@@ -75,8 +76,15 @@ func (s *Service) CreateRequest(ctx context.Context, staffUserID uuid.UUID, in C
 	return req, nil
 }
 
-func (s *Service) ListForPatient(ctx context.Context, patientID uuid.UUID) ([]*Request, error) {
-	return s.repository.ListByPatient(ctx, patientID)
+func (s *Service) ListForPatient(ctx context.Context, patientUserID uuid.UUID) ([]*Request, error) {
+	profile, err := s.patients.GetByUserID(ctx, patientUserID)
+	if err != nil {
+		if errors.Is(err, patient.ErrProfileNotFound) {
+			return []*Request{}, nil
+		}
+		return nil, err
+	}
+	return s.repository.ListByPatient(ctx, profile.ID)
 }
 
 func (s *Service) ListForHospitalStaff(ctx context.Context, staffUserID uuid.UUID) ([]*Request, error) {
@@ -124,12 +132,20 @@ func (s *Service) Reject(ctx context.Context, patientID, requestID uuid.UUID) (*
 	return updated, nil
 }
 
-func (s *Service) Revoke(ctx context.Context, patientID, requestID uuid.UUID) (*Request, error) {
+func (s *Service) Revoke(ctx context.Context, patientUserID, requestID uuid.UUID) (*Request, error) {
+	profile, err := s.patients.GetByUserID(ctx, patientUserID)
+	if err != nil {
+		if errors.Is(err, patient.ErrProfileNotFound) {
+			return nil, ErrNotOwner
+		}
+		return nil, err
+	}
+
 	req, err := s.repository.FindByID(ctx, requestID)
 	if err != nil {
 		return nil, err
 	}
-	if req.PatientID != patientID {
+	if req.PatientID != profile.ID {
 		return nil, ErrNotOwner
 	}
 	if req.Status != StatusApproved {
@@ -141,7 +157,7 @@ func (s *Service) Revoke(ctx context.Context, patientID, requestID uuid.UUID) (*
 		return nil, err
 	}
 
-	s.recordEvent(ctx, updated.ID, actionRevoked, patientID, map[string]any{
+	s.recordEvent(ctx, updated.ID, actionRevoked, patientUserID, map[string]any{
 		"patientId":  updated.PatientID.String(),
 		"hospitalId": updated.HospitalID.String(),
 	})
@@ -209,12 +225,20 @@ func (s *Service) FetchApprovedData(ctx context.Context, staffUserID, requestID 
 	return view, nil
 }
 
-func (s *Service) ownedPendingRequest(ctx context.Context, patientID, requestID uuid.UUID) (*Request, error) {
+func (s *Service) ownedPendingRequest(ctx context.Context, patientUserID, requestID uuid.UUID) (*Request, error) {
+	profile, err := s.patients.GetByUserID(ctx, patientUserID)
+	if err != nil {
+		if errors.Is(err, patient.ErrProfileNotFound) {
+			return nil, ErrNotOwner
+		}
+		return nil, err
+	}
+
 	req, err := s.repository.FindByID(ctx, requestID)
 	if err != nil {
 		return nil, err
 	}
-	if req.PatientID != patientID {
+	if req.PatientID != profile.ID {
 		return nil, ErrNotOwner
 	}
 	if req.Status != StatusPending {
