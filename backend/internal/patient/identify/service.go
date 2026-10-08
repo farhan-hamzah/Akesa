@@ -207,7 +207,7 @@ func (s *Service) UploadDocument(
 		ctx,
 		verification.ID,
 		storageKey,
-		StatusManualReview,
+		StatusPending,
 	)
 	if err != nil {
 		_ = s.fileStorage.Delete(
@@ -216,6 +216,82 @@ func (s *Service) UploadDocument(
 		)
 
 		return nil, err
+	}
+
+	return updated, nil
+}
+
+func (s *Service) UploadSelfie(
+	ctx context.Context,
+	userID uuid.UUID,
+	verificationID uuid.UUID,
+	reader io.Reader,
+	extension string,
+) (*Verification, error) {
+
+	verification, err := s.GetVerification(
+		ctx,
+		userID,
+		verificationID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if verification.Status == StatusVerified {
+		return nil, ErrVerificationCompleted
+	}
+
+	if verification.Status == StatusExpired {
+		return nil, ErrVerificationExpired
+	}
+
+	if verification.Status != StatusPending &&
+		verification.Status != StatusProcessing {
+		return nil, ErrVerificationCompleted
+	}
+
+	// Selfie hanya bisa dikirim jika KTP sudah ada.
+	if verification.DocumentStorageKey == nil ||
+		*verification.DocumentStorageKey == "" {
+		return nil, ErrDocumentNotUploaded
+	}
+
+	storageKey := fmt.Sprintf(
+		"identity/%s/%s/selfie/%s%s",
+		verification.PatientID,
+		verification.ID,
+		uuid.New().String(),
+		extension,
+	)
+
+	if err := s.fileStorage.Upload(
+		ctx,
+		storageKey,
+		reader,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"upload identity selfie: %w",
+			err,
+		)
+	}
+
+	updated, err := s.repository.UpdateSelfie(
+		ctx,
+		verification.ID,
+		storageKey,
+		string(StatusManualReview),
+	)
+	if err != nil {
+		_ = s.fileStorage.Delete(
+			ctx,
+			storageKey,
+		)
+
+		return nil, fmt.Errorf(
+			"save identity selfie: %w",
+			err,
+		)
 	}
 
 	return updated, nil

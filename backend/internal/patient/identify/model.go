@@ -32,6 +32,7 @@ type Verification struct {
 	Status               VerificationStatus `json:"status"`
 	DocumentType         DocumentType       `json:"documentType"`
 	DocumentStorageKey   *string            `json:"-"`
+	SelfieStorageKey     *string            `json:"-"`
 	ExtractedNIK         *string            `json:"-"`
 	ExtractedFullName    *string            `json:"-"`
 	ExtractedDateOfBirth *time.Time         `json:"-"`

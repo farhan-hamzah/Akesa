@@ -83,6 +83,9 @@ func (s *Server) registerRoutes(deps Dependencies) {
 	s.mux.Handle("POST /api/v1/patient/identity/verifications/{id}/document",
 		s.chain(deps, http.HandlerFunc(deps.IdentityHandler.UploadDocument), RolePatient),
 	)
+	s.mux.Handle("POST /api/v1/patient/identity/verifications/{id}/selfie",
+		s.chain(deps, http.HandlerFunc(deps.IdentityHandler.UploadSelfie), RolePatient),
+	)
 	s.mux.Handle("POST /api/v1/admin/identity-verifications/{id}/approve",
 		s.chain(deps, http.HandlerFunc(deps.IdentityHandler.ApproveVerification), RoleAdmin),
 	)
