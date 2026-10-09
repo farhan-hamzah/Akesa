@@ -21,7 +21,7 @@ type Log struct {
 	EntityID   uuid.UUID `json:"entityId"`
 	Action     string    `json:"action"`
 	ActorID    uuid.UUID `json:"actorId"`
-	Payload    []byte    `json:"payload"` // small JSON metadata only, never raw PII
+	Payload    []byte    `json:"payload"`
 	PrevHash   string    `json:"prevHash"`
 	Hash       string    `json:"hash"`
 	CreatedAt  time.Time `json:"createdAt"`

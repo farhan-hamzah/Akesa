@@ -27,6 +27,7 @@ const selectColumns = `
 	status,
 	document_type,
 	document_storage_key,
+	selfie_storage_key,
 	extracted_nik,
 	extracted_full_name,
 	extracted_date_of_birth,
@@ -118,6 +119,7 @@ func (r *Repository) FindLatestByPatientID(
             status,
             document_type,
             document_storage_key,
+			selfie_storage_key,
             extracted_nik,
             extracted_full_name,
             extracted_date_of_birth,
@@ -147,6 +149,7 @@ func (r *Repository) FindLatestByPatientID(
 		&verification.Status,
 		&verification.DocumentType,
 		&verification.DocumentStorageKey,
+		&verification.SelfieStorageKey,
 		&verification.ExtractedNIK,
 		&verification.ExtractedFullName,
 		&verification.ExtractedDateOfBirth,
@@ -226,6 +229,7 @@ func (r *Repository) scanRow(
 		&verification.Status,
 		&verification.DocumentType,
 		&verification.DocumentStorageKey,
+		&verification.SelfieStorageKey,
 		&verification.ExtractedNIK,
 		&verification.ExtractedFullName,
 		&verification.ExtractedDateOfBirth,
@@ -242,11 +246,8 @@ func (r *Repository) scanRow(
 		&verification.CreatedAt,
 		&verification.UpdatedAt,
 	)
-	if err != nil {
-		return err
-	}
 
-	return nil
+	return err
 }
 
 func (r *Repository) UpdateDocument(
@@ -319,6 +320,48 @@ func (r *Repository) UpdateDocument(
 	}
 
 	return &verification, nil
+}
+
+func (r *Repository) UpdateSelfie(
+	ctx context.Context,
+	id uuid.UUID,
+	storageKey string,
+	livenessStatus string,
+) (*Verification, error) {
+	query := `
+		UPDATE identity_verifications
+		SET
+			selfie_storage_key = $2,
+			liveness_status = $3,
+			updated_at = NOW()
+		WHERE id = $1
+		RETURNING ` + selectColumns
+
+	verification := &Verification{}
+
+	err := r.scanRow(
+		r.db.QueryRow(
+			ctx,
+			query,
+			id,
+			storageKey,
+			livenessStatus,
+		),
+		verification,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrVerificationNotFound
+		}
+
+		return nil, fmt.Errorf(
+			"update identity verification selfie: %w",
+			err,
+		)
+	}
+
+	return verification, nil
 }
 
 func (r *Repository) MarkVerified(
