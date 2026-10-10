@@ -2026,63 +2026,7 @@ Approved Data Access
 
 Role hanya menentukan apakah user memiliki jenis akses tertentu.
 
-Tetap lakukan pengecekan bahwa resource memang milik user tersebut.
-
----
-
-### 4. Data Minimization
-
-Rumah sakit hanya mendapatkan kategori data yang disetujui pasien.
-
-Contoh:
-
-```text
-IDENTITY
-```
-
-tidak otomatis memberikan:
-
-```text
-MEDICAL_BASIC
-INSURANCE
-EMERGENCY_CONTACT
-```
-
----
-
-### 5. Sensitive Data Protection
-
-NIK dan data sensitif lainnya harus diperlakukan sebagai data sensitif.
-
-Jangan:
-
-```text
-log.Println(nik)
-```
-
-atau memasukkan data pribadi langsung ke audit chain/blockchain.
-
----
-
-### 6. Auditability
-
-Aktivitas penting harus dapat ditelusuri melalui audit trail.
-
-Contoh:
-
-```text
-Profile Created
-Profile Updated
-Identity Verification
-Access Request
-Access Approved
-Access Rejected
-Access Revoked
-Patient Data Accessed
-QR Rotation
-```
-
----
+Tetap ---
 
 ## 24. Status Implementasi
 
@@ -2109,6 +2053,8 @@ Secara garis besar backend Akesa saat ini memiliki komponen:
 [✓] Audit Chain Integrity Verification
 [✓] Admin Security Alerts & Tamper Incident Monitoring
 [✓] Patient Access & Security Timeline
+[✓] In-App Notification Center & Unread Badge Counter
+[✓] Mobile Push Notification & Device Token Management (FCM-Ready)
 [✓] Hybrid Blockchain PoC
 ```
 
@@ -2136,9 +2082,85 @@ Secara keseluruhan:
                          └──────┬───────┘
                                 │
                                 ▼
-┌──────────────┐        ┌───────────────┐
-│ Flutter App  │ ─────► │  Go Backend   │
-└──────────────┘        └───────┬───────┘
+┌──────────────┐        ┌───────────────┐        ┌──────────────────┐
+│ Flutter App  │ ─────► │  Go Backend   │ ─────► │ Push Gateway/FCM │
+└──────────────┘        └───────┬───────┘        └────────┬─────────┘
+                                │                         │
+             ┌──────────────────┼──────────────────┐      ▼
+             │                  │                  │   Layar HP
+             ▼                  ▼                  ▼  (Pop-up Alert)
+       Patient Domain     Hospital Domain     Identity
+             │                  │           Verification
+             │                  │                  │
+             └──────────────────┼──────────────────┘
+                                │
+                                ▼
+                         Access / Consent
+                                │
+                                ▼
+                         Notification Layer
+                                │
+                                ▼
+                          Audit Service
+                                │
+                    ┌───────────┴───────────┐
+                    ▼                       ▼
+               PostgreSQL             Blockchain
+               Hash Chain                PoC
+```
+
+Tujuan akhirnya adalah menjaga agar data pasien tetap berada di bawah kontrol pasien, sementara rumah sakit hanya mendapatkan data yang memang diperlukan dan telah mendapatkan permission.
+
+---
+
+# 26. Sistem Notifikasi (In-App Center & Mobile Push)
+
+Sistem notifikasi Akesa menggabungkan **In-App Notification Center** (penyimpanan riwayat di PostgreSQL) dan **Mobile Push Gateway** (pendaftaran token perangkat FCM untuk Android/iOS).
+
+### 26.1. Skema Database (Migration `000013`)
+
+* **`notifications`**:
+  * `id`: UUID (Primary Key)
+  * `user_id`: UUID (Foreign Key ke `users(id)`)
+  * `title`: VARCHAR(255)
+  * `message`: TEXT
+  * `category`: `notification_category` (`SECURITY_ALERT`, `ACCESS_REQUEST`, `HOSPITAL_LIFECYCLE`, `SYSTEM`)
+  * `severity`: `notification_severity` (`INFO`, `WARNING`, `CRITICAL`)
+  * `is_read`: BOOLEAN (Default `false`)
+  * `action_url`: VARCHAR(255) (Deep-link di aplikasi mobile/web)
+  * `metadata`: JSONB
+  * `created_at`, `read_at`: TIMESTAMPTZ
+
+* **`user_device_tokens`**:
+  * `id`: UUID
+  * `user_id`: UUID (Foreign Key ke `users(id)`)
+  * `token`: TEXT UNIQUE (Token unik registrasi FCM)
+  * `platform`: VARCHAR(20) (`android`, `ios`)
+  * `created_at`, `updated_at`: TIMESTAMPTZ
+
+### 26.2. Endpoint API Notifikasi
+
+Semua endpoint dilindungi autentikasi (`Bearer <token>`):
+
+| Method | Endpoint | Keterangan |
+| :--- | :--- | :--- |
+| `POST` | `/api/v1/notifications/device-token` | Registrasi token FCM perangkat setelah login |
+| `DELETE` | `/api/v1/notifications/device-token` | Hapus token FCM perangkat saat logout |
+| `GET` | `/api/v1/notifications?unread_only=false&limit=20&offset=0` | Daftar riwayat notifikasi pengguna |
+| `GET` | `/api/v1/notifications/unread-count` | Jumlah notifikasi belum dibaca (badge lonceng) |
+| `PATCH` | `/api/v1/notifications/{id}/read` | Menandai satu notifikasi telah dibaca |
+| `POST` | `/api/v1/notifications/read-all` | Menandai semua notifikasi telah dibaca |
+
+### 26.3. Event Pemicu Otomatis (Event Triggers)
+
+1. **Pelanggaran Integritas Data (`INTEGRITY_VIOLATION_BLOCKED`)**:
+   * Pasien menerima peringatan kritis bahwa ada upaya akses yang dibatalkan karena hash tidak cocok dengan blockchain.
+   * Admin menerima broadcast notifikasi insiden keamanan dengan action URL `/admin/security-alerts`.
+2. **Permintaan Izin Akses (`ACCESS_REQUESTED`)**:
+   * Pasien menerima notifikasi permintaan izin akses saat staf RS mengajukan permohonan.
+3. **Persetujuan / Penolakan Akses (`ACCESS_APPROVED` / `ACCESS_REJECTED`)**:
+   * Staf rumah sakit yang mengajukan permintaan menerima notifikasi hasil keputusan pasien.
+��─────┘
                                 │
              ┌──────────────────┼──────────────────┐
              │                  │                  │

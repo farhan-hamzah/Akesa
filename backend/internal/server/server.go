@@ -8,6 +8,7 @@ import (
 	"github.com/farhan-hamzah/Akesa/backend/internal/auth"
 	"github.com/farhan-hamzah/Akesa/backend/internal/hospital"
 	appmiddleware "github.com/farhan-hamzah/Akesa/backend/internal/middleware"
+	"github.com/farhan-hamzah/Akesa/backend/internal/notification"
 	"github.com/farhan-hamzah/Akesa/backend/internal/patient"
 	identity "github.com/farhan-hamzah/Akesa/backend/internal/patient/identify"
 	"github.com/farhan-hamzah/Akesa/backend/internal/patientqr"
@@ -21,14 +22,15 @@ const (
 )
 
 type Dependencies struct {
-	UserLoader       auth.UserLoader
-	UserHandler      *user.Handler
-	PatientHandler   *patient.Handler
-	IdentityHandler  *identity.Handler
-	HospitalHandler  *hospital.Handler
-	AccessHandler    *access.Handler
-	AuditHandler     *audit.Handler
-	PatientQRHandler *patientqr.Handler
+	UserLoader          auth.UserLoader
+	UserHandler         *user.Handler
+	PatientHandler      *patient.Handler
+	IdentityHandler     *identity.Handler
+	HospitalHandler     *hospital.Handler
+	AccessHandler       *access.Handler
+	AuditHandler        *audit.Handler
+	PatientQRHandler    *patientqr.Handler
+	NotificationHandler *notification.Handler
 }
 type Server struct {
 	mux *http.ServeMux
@@ -173,6 +175,26 @@ func (s *Server) registerRoutes(deps Dependencies) {
 	)
 	s.mux.Handle("POST /api/v1/patient/qr/rotate",
 		s.chain(deps, http.HandlerFunc(deps.PatientQRHandler.Rotate), RolePatient),
+	)
+
+	// --- Notification routes (Mobile & Web) ---
+	s.mux.Handle("POST /api/v1/notifications/device-token",
+		s.chain(deps, http.HandlerFunc(deps.NotificationHandler.RegisterDeviceToken)),
+	)
+	s.mux.Handle("DELETE /api/v1/notifications/device-token",
+		s.chain(deps, http.HandlerFunc(deps.NotificationHandler.UnregisterDeviceToken)),
+	)
+	s.mux.Handle("GET /api/v1/notifications",
+		s.chain(deps, http.HandlerFunc(deps.NotificationHandler.List)),
+	)
+	s.mux.Handle("GET /api/v1/notifications/unread-count",
+		s.chain(deps, http.HandlerFunc(deps.NotificationHandler.GetUnreadCount)),
+	)
+	s.mux.Handle("PATCH /api/v1/notifications/{id}/read",
+		s.chain(deps, http.HandlerFunc(deps.NotificationHandler.MarkAsRead)),
+	)
+	s.mux.Handle("POST /api/v1/notifications/read-all",
+		s.chain(deps, http.HandlerFunc(deps.NotificationHandler.MarkAllAsRead)),
 	)
 }
 

@@ -3,9 +3,11 @@ package access
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 
 	"github.com/farhan-hamzah/Akesa/backend/internal/hospital"
+	"github.com/farhan-hamzah/Akesa/backend/internal/notification"
 	"github.com/farhan-hamzah/Akesa/backend/internal/patient"
 	"github.com/google/uuid"
 )
@@ -14,7 +16,6 @@ type PatientLookup interface {
 	GetByUserID(ctx context.Context, userID uuid.UUID) (*patient.Profile, error)
 	GetByPatientCode(ctx context.Context, patientCode string) (*patient.Profile, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*patient.Profile, error)
-	GetByUserID(ctx context.Context, userID uuid.UUID) (*patient.Profile, error)
 	ComputeHash(profile *patient.Profile) string
 }
 
@@ -43,10 +44,15 @@ type Service struct {
 	patients   PatientLookup
 	staff      StaffLookup
 	audit      AuditRecorder
+	notifier   notification.Notifier
 }
 
 func NewService(repository *Repository, patients PatientLookup, staff StaffLookup, audit AuditRecorder) *Service {
 	return &Service{repository: repository, patients: patients, staff: staff, audit: audit}
+}
+
+func (s *Service) SetNotifier(notifier notification.Notifier) {
+	s.notifier = notifier
 }
 
 func (s *Service) CreateRequest(ctx context.Context, staffUserID uuid.UUID, in CreateRequestInput) (*Request, error) {
@@ -73,6 +79,21 @@ func (s *Service) CreateRequest(ctx context.Context, staffUserID uuid.UUID, in C
 		"categories": in.Categories,
 		"patientId":  patientProfile.ID.String(),
 	})
+
+	if s.notifier != nil {
+		_ = s.notifier.NotifyUser(ctx, patientProfile.UserID, notification.NotificationInput{
+			Title:     "Permintaan Izin Akses Rekam Medis",
+			Message:   "Sebuah rumah sakit meminta izin untuk mengakses rekam medis Anda.",
+			Category:  notification.CategoryAccessRequest,
+			Severity:  notification.SeverityInfo,
+			ActionURL: "/patient/access-requests",
+			Metadata: map[string]any{
+				"requestId":  req.ID.String(),
+				"hospitalId": staff.HospitalID.String(),
+				"purpose":    in.Purpose,
+			},
+		})
+	}
 
 	return req, nil
 }
@@ -136,6 +157,21 @@ func (s *Service) Approve(ctx context.Context, userID, requestID uuid.UUID) (*Re
 		"patientId":  updated.PatientID.String(),
 		"hospitalId": updated.HospitalID.String(),
 	})
+
+	if s.notifier != nil {
+		_ = s.notifier.NotifyUser(ctx, updated.RequestedBy, notification.NotificationInput{
+			Title:     "Permintaan Akses Disetujui",
+			Message:   "Pasien telah menyetujui permintaan akses rekam medis.",
+			Category:  notification.CategoryAccessRequest,
+			Severity:  notification.SeverityInfo,
+			ActionURL: fmt.Sprintf("/hospital/access-requests/%s/data", updated.ID),
+			Metadata: map[string]any{
+				"requestId": updated.ID.String(),
+				"patientId": updated.PatientID.String(),
+			},
+		})
+	}
+
 	return updated, nil
 }
 
@@ -165,6 +201,21 @@ func (s *Service) Reject(ctx context.Context, userID, requestID uuid.UUID) (*Req
 		"patientId":  updated.PatientID.String(),
 		"hospitalId": updated.HospitalID.String(),
 	})
+
+	if s.notifier != nil {
+		_ = s.notifier.NotifyUser(ctx, updated.RequestedBy, notification.NotificationInput{
+			Title:     "Permintaan Akses Ditolak",
+			Message:   "Pasien telah menolak permintaan akses rekam medis.",
+			Category:  notification.CategoryAccessRequest,
+			Severity:  notification.SeverityWarning,
+			ActionURL: "/hospital/access-requests",
+			Metadata: map[string]any{
+				"requestId": updated.ID.String(),
+				"patientId": updated.PatientID.String(),
+			},
+		})
+	}
+
 	return updated, nil
 }
 
@@ -251,6 +302,34 @@ func (s *Service) FetchApprovedData(ctx context.Context, staffUserID, requestID 
 				"hospitalId":   req.HospitalID.String(),
 				"reason":       "Real-time patient profile hash does not match anchored ledger hash",
 			})
+
+			if s.notifier != nil {
+				_ = s.notifier.NotifyUser(ctx, patientProfile.UserID, notification.NotificationInput{
+					Title:     "Peringatan Integritas Data",
+					Message:   "Upaya pembacaan rekam medis Anda diblokir otomatis karena hash data tidak cocok dengan rekaman blockchain.",
+					Category:  notification.CategorySecurityAlert,
+					Severity:  notification.SeverityCritical,
+					ActionURL: "/patient/history",
+					Metadata: map[string]any{
+						"requestId":    req.ID.String(),
+						"error":        "hash_mismatch",
+						"currentHash":  currentHash,
+						"recordedHash": recordedHash,
+					},
+				})
+				_ = s.notifier.NotifyRole(ctx, "ADMIN", notification.NotificationInput{
+					Title:     "Insiden Keamanan: Data Tampered Terdeteksi",
+					Message:   fmt.Sprintf("Hash mismatch pada pasien %s saat diakses staf %s.", req.PatientID, staffUserID),
+					Category:  notification.CategorySecurityAlert,
+					Severity:  notification.SeverityCritical,
+					ActionURL: "/admin/security-alerts",
+					Metadata: map[string]any{
+						"patientId":   req.PatientID.String(),
+						"staffUserId": staffUserID.String(),
+					},
+				})
+			}
+
 			return nil, ErrDataTampered
 		}
 	}
