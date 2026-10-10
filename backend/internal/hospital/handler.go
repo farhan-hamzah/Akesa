@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/farhan-hamzah/Akesa/backend/internal/auth"
@@ -352,6 +353,7 @@ func (h *Handler) writeServiceError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrApplicationAlreadyPendingReview):
 		response.Error(w, http.StatusBadRequest, "application_already_pending_review")
 	default:
+		log.Printf("[hospital handler] unexpected error: %v", err)
 		response.Error(w, http.StatusInternalServerError, "internal_server_error")
 	}
 }

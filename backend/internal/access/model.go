@@ -21,7 +21,7 @@ type Request struct {
 	HospitalID  uuid.UUID               `json:"hospitalId"`
 	PatientID   uuid.UUID               `json:"patientId"`
 	RequestedBy uuid.UUID               `json:"requestedBy"`
-	Purpose     string                  `json:"purpose"`
+	Purpose     *string                 `json:"purpose"`
 	Categories  []datacategory.Category `json:"categories"`
 	Status      Status                  `json:"status"`
 	DecidedAt   *time.Time              `json:"decidedAt,omitempty"`

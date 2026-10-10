@@ -11,8 +11,10 @@ import (
 )
 
 type PatientLookup interface {
+	GetByUserID(ctx context.Context, userID uuid.UUID) (*patient.Profile, error)
 	GetByPatientCode(ctx context.Context, patientCode string) (*patient.Profile, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*patient.Profile, error)
+	GetByUserID(ctx context.Context, userID uuid.UUID) (*patient.Profile, error)
 	ComputeHash(profile *patient.Profile) string
 }
 
@@ -67,15 +69,36 @@ func (s *Service) CreateRequest(ctx context.Context, staffUserID uuid.UUID, in C
 	}
 
 	s.recordEvent(ctx, req.ID, actionRequested, staffUserID, map[string]any{
-		"hospitalId": staff.HospitalID,
+		"hospitalId": staff.HospitalID.String(),
 		"categories": in.Categories,
+		"patientId":  patientProfile.ID.String(),
 	})
 
 	return req, nil
 }
 
-func (s *Service) ListForPatient(ctx context.Context, patientID uuid.UUID) ([]*Request, error) {
-	return s.repository.ListByPatient(ctx, patientID)
+func (s *Service) getPatientID(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) {
+	profile, err := s.patients.GetByUserID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, patient.ErrProfileNotFound) {
+			return uuid.Nil, ErrPatientNotFound
+		}
+		return uuid.Nil, err
+	}
+
+	return profile.ID, nil
+}
+
+func (s *Service) ListForPatient(ctx context.Context, userID uuid.UUID) ([]*Request, error) {
+	patientProfile, err := s.patients.GetByUserID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, patient.ErrProfileNotFound) {
+			return nil, ErrPatientNotFound
+		}
+		return nil, err
+	}
+
+	return s.repository.ListByPatient(ctx, patientProfile.ID)
 }
 
 func (s *Service) ListForHospitalStaff(ctx context.Context, staffUserID uuid.UUID) ([]*Request, error) {
@@ -86,54 +109,100 @@ func (s *Service) ListForHospitalStaff(ctx context.Context, staffUserID uuid.UUI
 	return s.repository.ListByHospital(ctx, staff.HospitalID)
 }
 
-func (s *Service) Approve(ctx context.Context, patientID, requestID uuid.UUID) (*Request, error) {
+func (s *Service) Approve(ctx context.Context, userID, requestID uuid.UUID) (*Request, error) {
+
+	patientID, err := s.getPatientID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
 	req, err := s.ownedPendingRequest(ctx, patientID, requestID)
 	if err != nil {
 		return nil, err
 	}
 
-	updated, err := s.repository.UpdateStatus(ctx, req.ID, StatusPending, StatusApproved)
+	updated, err := s.repository.UpdateStatus(
+		ctx,
+		req.ID,
+		StatusPending,
+		StatusApproved,
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	s.recordEvent(ctx, updated.ID, actionApproved, patientID, map[string]any{"categories": updated.Categories})
+	s.recordEvent(ctx, updated.ID, actionApproved, patientID, map[string]any{
+		"categories": updated.Categories,
+		"patientId":  updated.PatientID.String(),
+		"hospitalId": updated.HospitalID.String(),
+	})
 	return updated, nil
 }
 
-func (s *Service) Reject(ctx context.Context, patientID, requestID uuid.UUID) (*Request, error) {
+func (s *Service) Reject(ctx context.Context, userID, requestID uuid.UUID) (*Request, error) {
+
+	patientID, err := s.getPatientID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
 	req, err := s.ownedPendingRequest(ctx, patientID, requestID)
 	if err != nil {
 		return nil, err
 	}
 
-	updated, err := s.repository.UpdateStatus(ctx, req.ID, StatusPending, StatusRejected)
+	updated, err := s.repository.UpdateStatus(
+		ctx,
+		req.ID,
+		StatusPending,
+		StatusRejected,
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	s.recordEvent(ctx, updated.ID, actionRejected, patientID, nil)
+	s.recordEvent(ctx, updated.ID, actionRejected, patientID, map[string]any{
+		"patientId":  updated.PatientID.String(),
+		"hospitalId": updated.HospitalID.String(),
+	})
 	return updated, nil
 }
 
-func (s *Service) Revoke(ctx context.Context, patientID, requestID uuid.UUID) (*Request, error) {
+func (s *Service) Revoke(ctx context.Context, patientUserID, requestID uuid.UUID) (*Request, error) {
+	profile, err := s.patients.GetByUserID(ctx, patientUserID)
+	if err != nil {
+		if errors.Is(err, patient.ErrProfileNotFound) {
+			return nil, ErrNotOwner
+		}
+		return nil, err
+	}
+
 	req, err := s.repository.FindByID(ctx, requestID)
 	if err != nil {
 		return nil, err
 	}
-	if req.PatientID != patientID {
+	if req.PatientID != profile.ID {
 		return nil, ErrNotOwner
 	}
+
 	if req.Status != StatusApproved {
 		return nil, ErrNotApproved
 	}
 
-	updated, err := s.repository.UpdateStatus(ctx, req.ID, StatusApproved, StatusRevoked)
+	updated, err := s.repository.UpdateStatus(
+		ctx,
+		req.ID,
+		StatusApproved,
+		StatusRevoked,
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	s.recordEvent(ctx, updated.ID, actionRevoked, patientID, nil)
+	s.recordEvent(ctx, updated.ID, actionRevoked, patientUserID, map[string]any{
+		"patientId":  updated.PatientID.String(),
+		"hospitalId": updated.HospitalID.String(),
+	})
 	return updated, nil
 }
 
@@ -178,6 +247,9 @@ func (s *Service) FetchApprovedData(ctx context.Context, staffUserID, requestID 
 				"error":        "hash_mismatch",
 				"currentHash":  currentHash,
 				"recordedHash": recordedHash,
+				"patientId":    req.PatientID.String(),
+				"hospitalId":   req.HospitalID.String(),
+				"reason":       "Real-time patient profile hash does not match anchored ledger hash",
 			})
 			return nil, ErrDataTampered
 		}
@@ -188,17 +260,27 @@ func (s *Service) FetchApprovedData(ctx context.Context, staffUserID, requestID 
 	s.recordEvent(ctx, req.ID, actionAccessed, staffUserID, map[string]any{
 		"categories": req.Categories,
 		"dataHash":   currentHash,
+		"patientId":  req.PatientID.String(),
+		"hospitalId": req.HospitalID.String(),
 	})
 
 	return view, nil
 }
 
-func (s *Service) ownedPendingRequest(ctx context.Context, patientID, requestID uuid.UUID) (*Request, error) {
+func (s *Service) ownedPendingRequest(ctx context.Context, patientUserID, requestID uuid.UUID) (*Request, error) {
+	profile, err := s.patients.GetByUserID(ctx, patientUserID)
+	if err != nil {
+		if errors.Is(err, patient.ErrProfileNotFound) {
+			return nil, ErrNotOwner
+		}
+		return nil, err
+	}
+
 	req, err := s.repository.FindByID(ctx, requestID)
 	if err != nil {
 		return nil, err
 	}
-	if req.PatientID != patientID {
+	if req.PatientID != profile.ID {
 		return nil, ErrNotOwner
 	}
 	if req.Status != StatusPending {

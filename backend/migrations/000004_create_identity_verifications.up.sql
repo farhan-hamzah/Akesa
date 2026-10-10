@@ -1,4 +1,5 @@
 CREATE TABLE identity_verifications (
+
     id UUID PRIMARY KEY,
 
     patient_id UUID NOT NULL
@@ -6,22 +7,41 @@ CREATE TABLE identity_verifications (
         ON DELETE CASCADE,
 
     status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+
     document_type VARCHAR(30) NOT NULL DEFAULT 'KTP',
+
     document_storage_key TEXT,
+
+    selfie_storage_key TEXT,
+
     extracted_nik TEXT,
+
     extracted_full_name TEXT,
+
     extracted_date_of_birth DATE,
+
     extracted_gender VARCHAR(10),
+
     document_status VARCHAR(30),
+
     liveness_status VARCHAR(30),
+
     face_match_status VARCHAR(30),
+
     face_match_score DECIMAL(5,4),
+
     provider VARCHAR(50),
+
     provider_reference VARCHAR(255),
+
     failure_reason VARCHAR(100),
+
     verified_at TIMESTAMPTZ,
+
     expires_at TIMESTAMPTZ,
+
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     CONSTRAINT identity_verifications_status_check

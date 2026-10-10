@@ -133,10 +133,10 @@ Migration saat ini mencakup:
 000006_create_access_requests
 000007_create_audit_logs
 000008_encrypt_sensitive_fields
-000008_add_hospital_registration_fields
 000009_create_patient_qr_credentials
-000009_create_hospital_invitations
-000010_create_hospital_applications
+000010_add_hospital_registration_fields
+000011_create_hospital_invitations
+000012_create_hospital_applications
 ```
 
 ---
@@ -436,6 +436,56 @@ curl http://localhost:8080/api/v1/audit/verify-chain \
 ```
 
 Endpoint ini membutuhkan authentication.
+
+---
+
+## 4.3. Deteksi Data Tampering & Admin Security Alerts
+
+Ketika staf rumah sakit mencoba mengakses data pasien (`GET /api/v1/hospital/access-requests/{id}/data`), sistem melakukan validasi kriptografis real-time dengan menghitung ulang hash profil pasien saat itu juga dan membandingkannya dengan hash yang tersimpan di blockchain / ledger audit (`VerifyProfileOnChain`).
+
+Jika data profil di database terindikasi telah dimanipulasi atau diubah secara ilegal (*tampered*):
+1. Pengembalian data medis pasien langsung **dibatalkan/diblokir** (HTTP 409 Conflict `patient_data_integrity_violation`).
+2. Kejadian dicatat ke rantai audit sebagai event `INTEGRITY_VIOLATION_BLOCKED` lengkap dengan metadata forensik (hash asli vs hash saat ini, ID pasien, ID rumah sakit, alasan insiden).
+3. Administrator platform dapat memonitor seluruh insiden pelanggaran integritas ini melalui endpoint:
+
+```http
+GET /api/v1/admin/security-alerts?limit=20&offset=0
+```
+
+Role: `ADMIN`
+
+Contoh:
+```bash
+curl "http://localhost:8080/api/v1/admin/security-alerts?limit=10&offset=0" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+Response:
+```json
+{
+  "total": 1,
+  "alerts": [
+    {
+      "id": "c1a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c",
+      "entityType": "ACCESS_REQUEST",
+      "entityId": "e2f3g4h5-i6j7-8k9l-0m1n-2o3p4q5r6s7t",
+      "action": "INTEGRITY_VIOLATION_BLOCKED",
+      "actorId": "a9b8c7d6-e5f4-3a2b-1c0d-9e8f7a6b5c4d",
+      "payload": {
+        "error": "hash_mismatch",
+        "patientId": "11223344-5566-7788-9900-aabbccddeeff",
+        "hospitalId": "55667788-9900-aabb-ccdd-eeff00112233",
+        "currentHash": "a1b2c3d4e5f6...",
+        "recordedHash": "d4e5f6a1b2c3...",
+        "reason": "Real-time patient profile hash does not match anchored ledger hash"
+      },
+      "prevHash": "f1e2d3c4...",
+      "hash": "b5a4c3d2...",
+      "createdAt": "2026-10-04T14:32:00Z"
+    }
+  ]
+}
+```
 
 ---
 
@@ -1182,20 +1232,60 @@ Setelah revoke, rumah sakit tidak dapat lagi menggunakan request tersebut untuk 
 
 ## `GET /api/v1/patient/history`
 
-Menampilkan riwayat aktivitas pasien yang dicatat melalui audit trail.
+Menampilkan riwayat aktivitas pasien yang dicatat melalui audit trail secara komprehensif (timeline pembaruan profil, permohonan akses dari rumah sakit, persetujuan/penolakan akses, pencatatan data yang diakses, hingga peringatan insiden integritas data/tampering).
 
-Contohnya:
+Role: `PATIENT`
 
-```text
-PROFILE_CREATED
-PROFILE_UPDATED
-ACCESS_REQUEST_APPROVED
-ACCESS_REQUEST_REJECTED
-ACCESS_REVOKED
-DATA_ACCESSED
+Contoh:
+```bash
+curl http://localhost:8080/api/v1/patient/history \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
-Jenis event yang tersedia dapat berkembang mengikuti implementasi audit service.
+Response mengembalikan array dari timeline log audit yang berkaitan dengan pasien yang sedang login:
+
+```json
+[
+  {
+    "id": "c1a2b3c4-...",
+    "entityType": "PATIENT_PROFILE",
+    "entityId": "e2f3g4h5-...",
+    "action": "PROFILE_UPDATED",
+    "actorId": "a9b8c7d6-...",
+    "payload": {
+      "profileHash": "a1b2c3d4..."
+    },
+    "prevHash": "000000000...",
+    "hash": "e5f6a7b8...",
+    "createdAt": "2026-10-04T12:00:00Z"
+  },
+  {
+    "id": "d2b3c4d5-...",
+    "entityType": "ACCESS_REQUEST",
+    "entityId": "f3g4h5i6-...",
+    "action": "DATA_ACCESSED",
+    "actorId": "b1c2d3e4-...",
+    "payload": {
+      "categories": ["IDENTITY", "MEDICAL_BASIC"],
+      "dataHash": "a1b2c3d4...",
+      "hospitalId": "h1i2j3k4-...",
+      "patientId": "e2f3g4h5-..."
+    },
+    "prevHash": "e5f6a7b8...",
+    "hash": "9a8b7c6d...",
+    "createdAt": "2026-10-04T12:30:00Z"
+  }
+]
+```
+
+Event yang dapat muncul di timeline pasien antara lain:
+- `PROFILE_UPDATED`: Pembaruan data profil dan penjangkaran hash baru ke audit chain.
+- `ACCESS_REQUESTED`: Permintaan akses data baru yang dikirimkan oleh staf rumah sakit.
+- `ACCESS_APPROVED`: Pasien menyetujui permohonan akses data tertentu.
+- `ACCESS_REJECTED`: Pasien menolak permohonan akses data.
+- `ACCESS_REVOKED`: Pasien mencabut izin akses yang sebelumnya aktif.
+- `DATA_ACCESSED`: Rumah sakit telah membaca/mengambil data medis pasien sesuai kategori izin.
+- `INTEGRITY_VIOLATION_BLOCKED`: Terjadi peringatan keamanan saat rumah sakit mencoba mengambil data namun terdeteksi ketidakcocokan hash (indikasi data di database telah dimanipulasi).
 
 ---
 
@@ -1791,6 +1881,7 @@ New QR → active
 | `POST`  | `/api/v1/admin/hospital-applications/{id}/approve`          | Setujui permohonan RS & promosi role PIC |
 | `POST`  | `/api/v1/admin/identity-verifications/{id}/approve`         | Approve KTP verification                 |
 | `POST`  | `/api/v1/admin/identity-verifications/{id}/reject`          | Reject KTP verification                  |
+| `GET`   | `/api/v1/admin/security-alerts`                             | List insiden pelanggaran integritas data (tampering alerts) |
 
 ---
 
@@ -2016,6 +2107,8 @@ Secara garis besar backend Akesa saat ini memiliki komponen:
 [✓] NIK Hashing
 [✓] Audit Hash Chain
 [✓] Audit Chain Integrity Verification
+[✓] Admin Security Alerts & Tamper Incident Monitoring
+[✓] Patient Access & Security Timeline
 [✓] Hybrid Blockchain PoC
 ```
 

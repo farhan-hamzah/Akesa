@@ -8,6 +8,7 @@ var (
 	ErrVerificationCompleted = errors.New("identity verification already completed")
 	ErrTooManyAttempts       = errors.New("too many verification attempts")
 
+	ErrDocumentNotUploaded = errors.New("identity document not uploaded")
 	ErrInvalidDocumentType = errors.New("invalid identity document type")
 	ErrDocumentTooLarge    = errors.New("identity document is too large")
 

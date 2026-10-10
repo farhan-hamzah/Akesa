@@ -212,6 +212,86 @@ func (r *Repository) GetLatestEntityLog(ctx context.Context, entityType string, 
 	return entry, nil
 }
 
+func (r *Repository) ListSecurityAlerts(ctx context.Context, limit, offset int) ([]*Log, int, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	var total int
+	err := r.db.QueryRow(
+		ctx,
+		`SELECT COUNT(*) FROM audit_logs WHERE action = $1`,
+		ActionIntegrityViolationBlocked,
+	).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("count security alerts: %w", err)
+	}
+
+	rows, err := r.db.Query(
+		ctx,
+		`SELECT id, entity_type, entity_id, action, actor_id, payload, prev_hash, hash, created_at
+		 FROM audit_logs
+		 WHERE action = $1
+		 ORDER BY created_at DESC
+		 LIMIT $2 OFFSET $3`,
+		ActionIntegrityViolationBlocked, limit, offset,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query security alerts: %w", err)
+	}
+	defer rows.Close()
+
+	var logs []*Log
+	for rows.Next() {
+		entry := &Log{}
+		if err := rows.Scan(
+			&entry.ID, &entry.EntityType, &entry.EntityID, &entry.Action, &entry.ActorID,
+			&entry.Payload, &entry.PrevHash, &entry.Hash, &entry.CreatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scan security alert: %w", err)
+		}
+		logs = append(logs, entry)
+	}
+
+	return logs, total, rows.Err()
+}
+
+func (r *Repository) ListPatientTimeline(ctx context.Context, patientID uuid.UUID) ([]*Log, error) {
+	rows, err := r.db.Query(
+		ctx,
+		`SELECT id, entity_type, entity_id, action, actor_id, payload, prev_hash, hash, created_at
+		 FROM audit_logs
+		 WHERE (entity_type = 'PATIENT_PROFILE' AND entity_id = $1)
+		    OR (payload->>'patientId' = $2)
+		 ORDER BY created_at DESC`,
+		patientID, patientID.String(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query patient timeline: %w", err)
+	}
+	defer rows.Close()
+
+	var logs []*Log
+	for rows.Next() {
+		entry := &Log{}
+		if err := rows.Scan(
+			&entry.ID, &entry.EntityType, &entry.EntityID, &entry.Action, &entry.ActorID,
+			&entry.Payload, &entry.PrevHash, &entry.Hash, &entry.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan patient timeline log: %w", err)
+		}
+		logs = append(logs, entry)
+	}
+
+	return logs, rows.Err()
+}
+
 func computeHash(
 	prevHash string,
 	entityType string,

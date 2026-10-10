@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/farhan-hamzah/Akesa/backend/internal/auth"
@@ -169,6 +170,7 @@ func (h *Handler) writeServiceError(w http.ResponseWriter, err error) {
 	case errors.Is(err, patient.ErrProfileNotFound):
 		response.Error(w, http.StatusNotFound, "patient_not_found")
 	default:
+		log.Printf("[access handler] unexpected error: %v", err)
 		response.Error(w, http.StatusInternalServerError, "internal_server_error")
 	}
 }
