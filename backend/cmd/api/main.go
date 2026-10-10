@@ -16,6 +16,7 @@ import (
 	"github.com/farhan-hamzah/Akesa/backend/internal/crypto"
 	"github.com/farhan-hamzah/Akesa/backend/internal/database"
 	"github.com/farhan-hamzah/Akesa/backend/internal/hospital"
+	"github.com/farhan-hamzah/Akesa/backend/internal/notification"
 	"github.com/farhan-hamzah/Akesa/backend/internal/patient"
 	identity "github.com/farhan-hamzah/Akesa/backend/internal/patient/identify"
 	"github.com/farhan-hamzah/Akesa/backend/internal/patient/storage"
@@ -94,15 +95,21 @@ func main() {
 	accessService := access.NewService(accessRepository, patientService, hospitalService, auditService)
 	accessHandler := access.NewHandler(accessService)
 
+	notificationRepo := notification.NewRepository(db)
+	notificationService := notification.NewService(notificationRepo, notification.NewLoggerPushClient())
+	notificationHandler := notification.NewHandler(notificationService)
+	accessService.SetNotifier(notificationService)
+
 	appServer := server.New(server.Dependencies{
-		UserLoader:       userService,
-		UserHandler:      userHandler,
-		PatientHandler:   patientHandler,
-		HospitalHandler:  hospitalHandler,
-		AccessHandler:    accessHandler,
-		AuditHandler:     auditHandler,
-		PatientQRHandler: patientQRHandler,
-		IdentityHandler:  identityHandler,
+		UserLoader:          userService,
+		UserHandler:         userHandler,
+		PatientHandler:      patientHandler,
+		HospitalHandler:     hospitalHandler,
+		AccessHandler:       accessHandler,
+		AuditHandler:        auditHandler,
+		PatientQRHandler:    patientQRHandler,
+		IdentityHandler:     identityHandler,
+		NotificationHandler: notificationHandler,
 	})
 
 	addr := ":" + cfg.Port
