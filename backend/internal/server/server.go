@@ -165,6 +165,9 @@ func (s *Server) registerRoutes(deps Dependencies) {
 	s.mux.Handle("POST /api/v1/admin/hospital-applications/{id}/approve",
 		s.chain(deps, http.HandlerFunc(deps.HospitalHandler.ApproveApplication), RoleAdmin),
 	)
+	s.mux.Handle("GET /api/v1/admin/security-alerts",
+		s.chain(deps, http.HandlerFunc(deps.AuditHandler.SecurityAlerts), RoleAdmin),
+	)
 	s.mux.Handle("GET /api/v1/patient/qr",
 		s.chain(deps, http.HandlerFunc(deps.PatientQRHandler.Get), RolePatient),
 	)

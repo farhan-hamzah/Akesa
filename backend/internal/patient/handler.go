@@ -3,6 +3,7 @@ package patient
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/farhan-hamzah/Akesa/backend/internal/auth"
@@ -98,6 +99,7 @@ func (h *Handler) writeServiceError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrNIKAlreadyRegistered):
 		response.Error(w, http.StatusConflict, "nik_already_registered")
 	default:
+		log.Printf("[patient handler] unexpected error: %v", err)
 		response.Error(w, http.StatusInternalServerError, "internal_server_error")
 	}
 }
