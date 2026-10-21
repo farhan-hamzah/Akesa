@@ -36,11 +36,6 @@ func (s *Service) CreateFromClerk(ctx context.Context, clerkUserID string) (*Use
 	)
 }
 
-// LoadAuthUser implements auth.UserLoader - this is what turns a bare
-// Clerk-authenticated request into a request carrying our own user id,
-// role and status, which auth.RequireRole then checks. This is the single
-// source of truth for "what role does this caller actually have" - never
-// trust a role claimed by the client.
 func (s *Service) LoadAuthUser(ctx context.Context, clerkUserID string) (*auth.AuthUser, error) {
 	u, err := s.repository.FindByClerkUserID(ctx, clerkUserID)
 	if err != nil {
@@ -57,7 +52,6 @@ func (s *Service) LoadAuthUser(ctx context.Context, clerkUserID string) (*auth.A
 	}, nil
 }
 
-// UpdateRole implements hospital.UserRoleUpdater.
 func (s *Service) UpdateRole(ctx context.Context, userID uuid.UUID, role string) error {
 	r := Role(role)
 	if !IsValidRole(r) {

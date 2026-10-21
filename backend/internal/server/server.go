@@ -7,6 +7,7 @@ import (
 	"github.com/farhan-hamzah/Akesa/backend/internal/audit"
 	"github.com/farhan-hamzah/Akesa/backend/internal/auth"
 	"github.com/farhan-hamzah/Akesa/backend/internal/hospital"
+	"github.com/farhan-hamzah/Akesa/backend/internal/ktpocr"
 	appmiddleware "github.com/farhan-hamzah/Akesa/backend/internal/middleware"
 	"github.com/farhan-hamzah/Akesa/backend/internal/notification"
 	"github.com/farhan-hamzah/Akesa/backend/internal/patient"
@@ -31,6 +32,7 @@ type Dependencies struct {
 	AuditHandler        *audit.Handler
 	PatientQRHandler    *patientqr.Handler
 	NotificationHandler *notification.Handler
+	KTPOCRHandler       *ktpocr.Handler
 }
 type Server struct {
 	mux *http.ServeMux
@@ -122,7 +124,9 @@ func (s *Server) registerRoutes(deps Dependencies) {
 	s.mux.Handle("GET /api/v1/patient/history",
 		s.chain(deps, http.HandlerFunc(deps.AuditHandler.MyProfileHistory), RolePatient),
 	)
-
+	s.mux.Handle("POST /api/v1/patient/ktp/ocr",
+		s.chain(deps, http.HandlerFunc(deps.KTPOCRHandler.Upload), RolePatient),
+	)
 	s.mux.Handle("POST /api/v1/hospital/access-requests",
 		s.chain(deps, http.HandlerFunc(deps.AccessHandler.Create), RoleStaff),
 	)

@@ -7,21 +7,22 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"ktp-ocr/backend/internal/client"
 	"ktp-ocr/backend/internal/handler"
 	"ktp-ocr/backend/internal/service"
+
+	"github.com/gin-gonic/gin"
 )
 
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "9090"
 	}
 
 	aiServiceURL := os.Getenv("AI_SERVICE_URL")
 	if aiServiceURL == "" {
-		aiServiceURL = "http://localhost:8000"
+		aiServiceURL = "http://localhost:8081"
 	}
 
 	timeoutSec := 60

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/farhan-hamzah/Akesa/backend/internal/crypto"
 	"github.com/google/uuid"
@@ -38,6 +39,7 @@ func (r *Repository) FindByUserID(
 	ctx context.Context,
 	userID uuid.UUID,
 ) (*Profile, error) {
+	log.Printf("[DEBUG FindByUserID] userID=%s", userID)
 	return r.scanOne(
 		ctx,
 		`SELECT
@@ -57,7 +59,9 @@ func (r *Repository) FindByUserID(
 			emergency_contact_name,
 			emergency_contact_phone,
 			created_at,
-			updated_at
+			updated_at,
+			identity_verification_status,
+			profile_completed
 		FROM patient_profiles
 		WHERE user_id = $1`,
 		userID,
@@ -87,7 +91,9 @@ func (r *Repository) FindByPatientCode(
 			emergency_contact_name,
 			emergency_contact_phone,
 			created_at,
-			updated_at
+			updated_at,
+			identity_verification_status,
+			profile_completed
 		FROM patient_profiles
 		WHERE patient_code = $1`,
 		patientCode,
@@ -117,7 +123,9 @@ func (r *Repository) FindByID(
 			emergency_contact_name,
 			emergency_contact_phone,
 			created_at,
-			updated_at
+			updated_at,
+			identity_verification_status,
+			profile_completed
 		FROM patient_profiles
 		WHERE id = $1`,
 		id,
@@ -176,6 +184,29 @@ func (r *Repository) Create(
 		)
 	}
 
+	// Encrypt emergency contact name
+	encryptedEmergencyContactName, err := r.cipher.Encrypt(
+		derefOrEmpty(in.EmergencyContactName),
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"encrypt emergency contact name:: %w",
+			err,
+		)
+	}
+
+	// Encrypt emergency contact number
+	encryptedEmergencyContactPhone, err := r.cipher.Encrypt(
+		derefOrEmpty(in.EmergencyContactPhone),
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf(
+			"encrypt emergency contact number: %w",
+			err,
+		)
+	}
+
 	for attempt := 0; attempt < 5; attempt++ {
 		code, err := generatePatientCode()
 		if err != nil {
@@ -226,7 +257,9 @@ func (r *Repository) Create(
 				emergency_contact_name,
 				emergency_contact_phone,
 				created_at,
-				updated_at`,
+				updated_at,
+				identity_verification_status,
+				profile_completed`,
 			uuid.New(),
 			userID,
 			code,
@@ -241,8 +274,8 @@ func (r *Repository) Create(
 			nilIfEmpty(encryptedDrugAllergy),
 			nilIfEmpty(encryptedMedicalHistory),
 			nilIfEmpty(encryptedInsurance),
-			in.EmergencyContactName,
-			in.EmergencyContactPhone,
+			nilIfEmpty(encryptedEmergencyContactName),
+			nilIfEmpty(encryptedEmergencyContactPhone),
 		)
 
 		profile, err := r.scanRow(row)
@@ -285,6 +318,12 @@ func (r *Repository) Update(
 	userID uuid.UUID,
 	in ProfileInput,
 ) (*Profile, error) {
+
+	log.Printf(
+		"[DEBUG Create/Update] emergencyContactName=%q, emergencyContactPhone=%q",
+		derefOrEmpty(in.EmergencyContactName),
+		derefOrEmpty(in.EmergencyContactPhone),
+	)
 
 	// Encrypt NIK
 	encryptedNIK, err := r.cipher.Encrypt(
@@ -335,6 +374,30 @@ func (r *Repository) Update(
 		)
 	}
 
+	// Encrypt emergency contact name
+	encryptedEmergencyContactName, err := r.cipher.Encrypt(
+		derefOrEmpty(in.EmergencyContactName),
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf(
+			"encrypt emergency contact name:: %w",
+			err,
+		)
+	}
+
+	// Encrypt emergency contact number
+	encryptedEmergencyContactPhone, err := r.cipher.Encrypt(
+		derefOrEmpty(in.EmergencyContactPhone),
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf(
+			"encrypt emergency contact number: %w",
+			err,
+		)
+	}
+
 	row := r.db.QueryRow(
 		ctx,
 		`UPDATE patient_profiles
@@ -371,7 +434,9 @@ func (r *Repository) Update(
 			emergency_contact_name,
 			emergency_contact_phone,
 			created_at,
-			updated_at`,
+			updated_at,
+			identity_verification_status,
+			profile_completed`,
 		userID,
 		in.FullName,
 		encryptedNIK,
@@ -384,8 +449,8 @@ func (r *Repository) Update(
 		nilIfEmpty(encryptedDrugAllergy),
 		nilIfEmpty(encryptedMedicalHistory),
 		nilIfEmpty(encryptedInsurance),
-		in.EmergencyContactName,
-		in.EmergencyContactPhone,
+		nilIfEmpty(encryptedEmergencyContactName),
+		nilIfEmpty(encryptedEmergencyContactPhone),
 	)
 
 	profile, err := r.scanRow(row)
@@ -426,6 +491,8 @@ func (r *Repository) scanRow(
 	var encryptedDrugAllergy *string
 	var encryptedMedicalHistory *string
 	var encryptedInsurance *string
+	var encryptedEmergencyContactName *string
+	var encryptedEmergencyContactPhone *string
 
 	err := row.Scan(
 		&profile.ID,
@@ -441,10 +508,12 @@ func (r *Repository) scanRow(
 		&encryptedDrugAllergy,
 		&encryptedMedicalHistory,
 		&encryptedInsurance,
-		&profile.EmergencyContactName,
-		&profile.EmergencyContactPhone,
+		&encryptedEmergencyContactName,
+		&encryptedEmergencyContactPhone,
 		&profile.CreatedAt,
 		&profile.UpdatedAt,
+		&profile.IdentityVerificationStatus,
+		&profile.ProfileCompleted,
 	)
 
 	if err != nil {
@@ -513,6 +582,40 @@ func (r *Repository) scanRow(
 
 		if insurance != "" {
 			profile.InsuranceNumber = &insurance
+		}
+	}
+
+	// Decrypt emergency contact name.
+	if encryptedEmergencyContactName != nil {
+		emergencyContactName, err := r.cipher.Decrypt(
+			*encryptedEmergencyContactName,
+		)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"decrypt emergency contact name: %w",
+				err,
+			)
+		}
+
+		if emergencyContactName != "" {
+			profile.EmergencyContactName = &emergencyContactName
+		}
+	}
+
+	// Decrypt emergency contact phone.
+	if encryptedEmergencyContactPhone != nil {
+		emergencyContactPhone, err := r.cipher.Decrypt(
+			*encryptedEmergencyContactPhone,
+		)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"decrypt emergency contact phone: %w",
+				err,
+			)
+		}
+
+		if emergencyContactPhone != "" {
+			profile.EmergencyContactPhone = &emergencyContactPhone
 		}
 	}
 

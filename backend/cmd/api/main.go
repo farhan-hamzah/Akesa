@@ -16,6 +16,7 @@ import (
 	"github.com/farhan-hamzah/Akesa/backend/internal/crypto"
 	"github.com/farhan-hamzah/Akesa/backend/internal/database"
 	"github.com/farhan-hamzah/Akesa/backend/internal/hospital"
+	"github.com/farhan-hamzah/Akesa/backend/internal/ktpocr"
 	"github.com/farhan-hamzah/Akesa/backend/internal/notification"
 	"github.com/farhan-hamzah/Akesa/backend/internal/patient"
 	identity "github.com/farhan-hamzah/Akesa/backend/internal/patient/identify"
@@ -100,6 +101,8 @@ func main() {
 	notificationHandler := notification.NewHandler(notificationService)
 	accessService.SetNotifier(notificationService)
 
+	ktpOCRHandler := ktpocr.NewHandler()
+
 	appServer := server.New(server.Dependencies{
 		UserLoader:          userService,
 		UserHandler:         userHandler,
@@ -110,6 +113,7 @@ func main() {
 		PatientQRHandler:    patientQRHandler,
 		IdentityHandler:     identityHandler,
 		NotificationHandler: notificationHandler,
+		KTPOCRHandler:       ktpOCRHandler,
 	})
 
 	addr := ":" + cfg.Port

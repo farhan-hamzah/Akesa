@@ -28,11 +28,11 @@ type ProfileRequest struct {
 	PhoneNumber           string  `json:"phoneNumber"`
 	Address               string  `json:"address"`
 	BloodType             *string `json:"bloodType,omitempty"`
-	DrugAllergy           *string `json:"drugAllergy,omitempty"`
-	MedicalHistory        *string `json:"medicalHistory,omitempty"`
-	InsuranceNumber       *string `json:"insuranceNumber,omitempty"`
-	EmergencyContactName  *string `json:"emergencyContactName,omitempty"`
-	EmergencyContactPhone *string `json:"emergencyContactPhone,omitempty"`
+	DrugAllergy           *string `json:"drugAllergy"`
+	MedicalHistory        *string `json:"medicalHistory"`
+	InsuranceNumber       *string `json:"insuranceNumber"`
+	EmergencyContactName  *string `json:"emergencyContactName"`
+	EmergencyContactPhone *string `json:"emergencyContactPhone"`
 }
 
 func (req ProfileRequest) Validate() (ProfileInput, error) {

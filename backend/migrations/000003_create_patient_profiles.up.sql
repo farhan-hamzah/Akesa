@@ -26,8 +26,8 @@ CREATE TABLE patient_profiles (
     drug_allergy TEXT,
     medical_history TEXT,
     insurance_number VARCHAR(100),
-    emergency_contact_name VARCHAR(255),
-    emergency_contact_phone VARCHAR(30),
+    emergency_contact_name TEXT,
+    emergency_contact_phone TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

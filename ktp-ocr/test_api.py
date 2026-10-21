@@ -40,10 +40,10 @@ def test_python_service(image_path: str):
 
 def test_go_backend(image_path: str):
     print("\n" + "=" * 60)
-    print(f"[2] TESTING GO BACKEND GATEWAY (http://localhost:8080/api/v1/ktp/ocr)")
+    print(f"[2] TESTING GO BACKEND GATEWAY (http://localhost:9090/api/v1/ktp/ocr)")
     print(f"Target Image: {os.path.basename(image_path)}")
     print("=" * 60)
-    url = "http://localhost:8080/api/v1/ktp/ocr"
+    url = "http://localhost:9090/api/v1/ktp/ocr"
 
     try:
         t0 = time.time()
@@ -57,7 +57,7 @@ def test_go_backend(image_path: str):
         print("Response JSON:")
         print(json.dumps(resp.json(), indent=2))
     except requests.exceptions.ConnectionError:
-        print("[GAGAL] Tidak dapat terhubung ke Go Backend di port 8080.")
+        print("[GAGAL] Tidak dapat terhubung ke Go Backend di port 9090.")
         print("Pastikan kamu sudah menjalankan di terminal 2:\n  cd backend\n  go run .")
 
 if __name__ == "__main__":

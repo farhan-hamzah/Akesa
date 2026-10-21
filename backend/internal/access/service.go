@@ -16,7 +16,6 @@ type PatientLookup interface {
 	GetByUserID(ctx context.Context, userID uuid.UUID) (*patient.Profile, error)
 	GetByPatientCode(ctx context.Context, patientCode string) (*patient.Profile, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*patient.Profile, error)
-	GetByUserID(ctx context.Context, userID uuid.UUID) (*patient.Profile, error)
 	ComputeHash(profile *patient.Profile) string
 }
 
