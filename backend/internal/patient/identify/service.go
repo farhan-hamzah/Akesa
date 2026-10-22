@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/farhan-hamzah/Akesa/backend/internal/patient"
@@ -276,18 +278,16 @@ func (s *Service) UploadSelfie(
 		)
 	}
 
+	storageKeyPtr := &storageKey
+
 	updated, err := s.repository.UpdateSelfie(
 		ctx,
 		verification.ID,
-		storageKey,
-		string(StatusManualReview),
+		storageKeyPtr,
+		StatusManualReview,
 	)
 	if err != nil {
-		_ = s.fileStorage.Delete(
-			ctx,
-			storageKey,
-		)
-
+		_ = s.fileStorage.Delete(ctx, storageKey)
 		return nil, fmt.Errorf(
 			"save identity selfie: %w",
 			err,
@@ -295,10 +295,12 @@ func (s *Service) UploadSelfie(
 	}
 
 	return updated, nil
+
 }
 
 func (s *Service) ApproveVerification(
 	ctx context.Context,
+	adminID uuid.UUID,
 	verificationID uuid.UUID,
 ) (*Verification, error) {
 
@@ -330,20 +332,22 @@ func (s *Service) ApproveVerification(
 
 func (s *Service) RejectVerification(
 	ctx context.Context,
+	adminID uuid.UUID,
 	verificationID uuid.UUID,
 	reason string,
 ) (*Verification, error) {
-
-	verification, err := s.repository.FindByID(
-		ctx,
-		verificationID,
-	)
+	verification, err := s.repository.FindByID(ctx, verificationID)
 	if err != nil {
 		return nil, err
 	}
 
 	if verification.Status != StatusManualReview {
 		return nil, ErrVerificationNotInReview
+	}
+
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil, errors.New("rejection reason is required")
 	}
 
 	verification.Status = StatusDocumentRejected
@@ -397,4 +401,57 @@ func (s *Service) GetLatestVerification(
 	}
 
 	return verification, nil
+}
+
+func (s *Service) GetReviewDocument(
+	ctx context.Context,
+	verificationID uuid.UUID,
+	documentType string,
+) ([]byte, string, error) {
+	verification, err := s.repository.FindByID(
+		ctx,
+		verificationID,
+	)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Dokumen hanya dapat dibaca selama menunggu pemeriksaan admin.
+	if verification.Status != StatusManualReview {
+		return nil, "", ErrVerificationNotInReview
+	}
+
+	var storageKey *string
+
+	switch strings.ToLower(documentType) {
+	case "ktp":
+		storageKey = verification.DocumentStorageKey
+	case "selfie":
+		storageKey = verification.SelfieStorageKey
+	default:
+		return nil, "", fmt.Errorf("unsupported document type")
+	}
+
+	if storageKey == nil || strings.TrimSpace(*storageKey) == "" {
+		return nil, "", ErrDocumentNotUploaded
+	}
+
+	data, err := s.fileStorage.Read(ctx, *storageKey)
+	if err != nil {
+		return nil, "", fmt.Errorf("read identity document: %w", err)
+	}
+
+	contentType := http.DetectContentType(data)
+	if contentType != "image/jpeg" &&
+		contentType != "image/png" {
+		return nil, "", fmt.Errorf("unsupported identity document format")
+	}
+
+	return data, contentType, nil
+}
+
+func (s *Service) ListPendingReview(
+	ctx context.Context,
+) ([]AdminIdentityQueueItem, error) {
+	return s.repository.ListPendingReview(ctx)
 }

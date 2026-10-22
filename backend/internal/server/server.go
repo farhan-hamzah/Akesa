@@ -112,6 +112,12 @@ func (s *Server) registerRoutes(deps Dependencies) {
 	s.mux.Handle("GET /api/v1/patient/access-requests",
 		s.chain(deps, http.HandlerFunc(deps.AccessHandler.ListMine), RolePatient),
 	)
+	s.mux.Handle("GET /api/v1/admin/identity-verifications",
+		s.chain(deps, http.HandlerFunc(deps.IdentityHandler.ListPendingReview), RoleAdmin),
+	)
+	s.mux.Handle("GET /api/v1/admin/identity-verifications/{id}/documents/{type}",
+		s.chain(deps, http.HandlerFunc(deps.IdentityHandler.GetReviewDocument), RoleAdmin),
+	)
 	s.mux.Handle("POST /api/v1/patient/access-requests/{id}/approve",
 		s.chain(deps, http.HandlerFunc(deps.AccessHandler.Approve), RolePatient),
 	)

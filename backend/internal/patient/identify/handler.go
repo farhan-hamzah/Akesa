@@ -3,6 +3,7 @@ package identity
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -485,9 +486,17 @@ func (h *Handler) ApproveVerification(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	id := r.PathValue("id")
+	authUser, ok := auth.GetAuthUser(r)
+	if !ok {
+		response.Error(
+			w,
+			http.StatusUnauthorized,
+			"unauthorized",
+		)
+		return
+	}
 
-	verificationID, err := uuid.Parse(id)
+	verificationID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		response.Error(
 			w,
@@ -499,6 +508,7 @@ func (h *Handler) ApproveVerification(
 
 	verification, err := h.service.ApproveVerification(
 		r.Context(),
+		authUser.ID,
 		verificationID,
 	)
 	if err != nil {
@@ -517,9 +527,19 @@ func (h *Handler) RejectVerification(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	id := r.PathValue("id")
+	// Ambil identitas admin dari middleware autentikasi.
+	authUser, ok := auth.GetAuthUser(r)
+	if !ok {
+		response.Error(
+			w,
+			http.StatusUnauthorized,
+			"unauthorized",
+		)
+		return
+	}
 
-	verificationID, err := uuid.Parse(id)
+	// Parse ID verifikasi dari URL.
+	verificationID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		response.Error(
 			w,
@@ -529,8 +549,8 @@ func (h *Handler) RejectVerification(
 		return
 	}
 
+	// Baca alasan penolakan dari request body.
 	var req RejectVerificationRequest
-
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(
 			w,
@@ -540,7 +560,8 @@ func (h *Handler) RejectVerification(
 		return
 	}
 
-	if strings.TrimSpace(req.Reason) == "" {
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
 		response.Error(
 			w,
 			http.StatusBadRequest,
@@ -551,8 +572,9 @@ func (h *Handler) RejectVerification(
 
 	verification, err := h.service.RejectVerification(
 		r.Context(),
+		authUser.ID,
 		verificationID,
-		strings.TrimSpace(req.Reason),
+		reason,
 	)
 	if err != nil {
 		h.writeServiceError(w, err)
@@ -595,4 +617,60 @@ func (h *Handler) GetLatestVerification(
 		http.StatusOK,
 		toVerificationResponse(verification),
 	)
+}
+
+func (h *Handler) ListPendingReview(w http.ResponseWriter, r *http.Request) {
+	items, err := h.service.ListPendingReview(r.Context())
+	if err != nil {
+		h.writeServiceError(w, err)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, items)
+}
+
+func (h *Handler) GetReviewDocument(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	verificationID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		response.Error(
+			w,
+			http.StatusBadRequest,
+			"invalid_verification_id",
+		)
+		return
+	}
+
+	documentType := strings.ToLower(r.PathValue("type"))
+
+	if documentType != "ktp" && documentType != "selfie" {
+		response.Error(
+			w,
+			http.StatusBadRequest,
+			"invalid_document_type",
+		)
+		return
+	}
+
+	data, contentType, err := h.service.GetReviewDocument(
+		r.Context(),
+		verificationID,
+		documentType,
+	)
+	if err != nil {
+		h.writeServiceError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.Header().Set("Cache-Control", "no-store, private")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Disposition", "inline")
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }

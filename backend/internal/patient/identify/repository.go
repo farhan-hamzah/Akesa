@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -257,99 +258,63 @@ func (r *Repository) UpdateDocument(
 	status VerificationStatus,
 ) (*Verification, error) {
 	const query = `
-		UPDATE identity_verifications
-		SET
-			document_storage_key = $2,
-			status = $3,
-			updated_at = NOW()
-		WHERE id = $1
-		RETURNING
-			id,
-			patient_id,
-			status,
-			document_type,
-			document_storage_key,
-			extracted_nik,
-			extracted_full_name,
-			extracted_date_of_birth,
-			extracted_gender,
-			document_status,
-			liveness_status,
-			face_match_status,
-			face_match_score,
-			provider,
-			provider_reference,
-			failure_reason,
-			verified_at,
-			expires_at,
-			created_at,
-			updated_at
-	`
+    UPDATE identity_verifications
+    SET
+        document_storage_key = $2,
+        status = $3,
+        updated_at = NOW()
+    WHERE id = $1
+      AND status IN ('PENDING', 'PROCESSING')
+      AND $2 IS NOT NULL
+      AND $2 <> ''
+    RETURNING ` + selectColumns
 
-	var verification Verification
+	verification := &Verification{}
 
-	err := r.db.QueryRow(ctx, query,
-		id,
-		storageKey,
-		status,
-	).Scan(
-		&verification.ID,
-		&verification.PatientID,
-		&verification.Status,
-		&verification.DocumentType,
-		&verification.DocumentStorageKey,
-		&verification.ExtractedNIK,
-		&verification.ExtractedFullName,
-		&verification.ExtractedDateOfBirth,
-		&verification.ExtractedGender,
-		&verification.DocumentStatus,
-		&verification.LivenessStatus,
-		&verification.FaceMatchStatus,
-		&verification.FaceMatchScore,
-		&verification.Provider,
-		&verification.ProviderReference,
-		&verification.FailureReason,
-		&verification.VerifiedAt,
-		&verification.ExpiresAt,
-		&verification.CreatedAt,
-		&verification.UpdatedAt,
+	err := r.scanRow(
+		r.db.QueryRow(ctx, query, id, storageKey, status),
+		verification,
 	)
-
 	if err != nil {
-		return nil, err
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrVerificationNotFound
+		}
+
+		return nil, fmt.Errorf(
+			"update identity verification document: %w",
+			err,
+		)
 	}
 
-	return &verification, nil
+	return verification, nil
 }
 
 func (r *Repository) UpdateSelfie(
 	ctx context.Context,
 	id uuid.UUID,
-	storageKey string,
-	livenessStatus string,
+	storageKey *string,
+	status VerificationStatus,
 ) (*Verification, error) {
-	query := `
-		UPDATE identity_verifications
-		SET
-			selfie_storage_key = $2,
-			liveness_status = $3,
-			updated_at = NOW()
-		WHERE id = $1
-		RETURNING ` + selectColumns
+	const query = `
+        UPDATE identity_verifications
+        SET
+            selfie_storage_key = $2,
+            status = $3,
+            updated_at = NOW()
+        WHERE id = $1
+          AND document_storage_key IS NOT NULL
+          AND document_storage_key <> ''
+          AND status IN ('PENDING', 'PROCESSING')
+          AND $2 IS NOT NULL
+          AND $2 <> ''
+        RETURNING ` + selectColumns
 
 	verification := &Verification{}
 
 	err := r.scanRow(
-		r.db.QueryRow(
-			ctx,
-			query,
-			id,
-			storageKey,
-			livenessStatus,
-		),
+		r.db.QueryRow(ctx, query, id, storageKey, status),
 		verification,
 	)
-
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrVerificationNotFound
@@ -369,23 +334,81 @@ func (r *Repository) MarkVerified(
 	verificationID uuid.UUID,
 	verifiedAt time.Time,
 ) error {
-	const query = `
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin verification transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var patientID uuid.UUID
+
+	const updateVerification = `
         UPDATE identity_verifications
         SET
             status = 'VERIFIED',
             verified_at = $2,
+            failure_reason = NULL,
             updated_at = NOW()
         WHERE id = $1
+          AND status = 'MANUAL_REVIEW'
+          AND document_storage_key IS NOT NULL
+          AND document_storage_key <> ''
+          AND selfie_storage_key IS NOT NULL
+          AND selfie_storage_key <> ''
+        RETURNING patient_id
     `
 
-	_, err := r.db.Exec(
+	err = tx.QueryRow(
 		ctx,
-		query,
+		updateVerification,
 		verificationID,
 		verifiedAt,
-	)
+	).Scan(&patientID)
 
-	return err
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf(
+				"verification not found or not eligible for approval: %w",
+				ErrVerificationNotFound,
+			)
+		}
+
+		return fmt.Errorf("mark verification as verified: %w", err)
+	}
+
+	const updatePatient = `
+    UPDATE patient_profiles
+    SET
+        identity_verification_status = 'VERIFIED',
+        profile_completed = (
+            NULLIF(BTRIM(full_name), '') IS NOT NULL
+            AND NULLIF(BTRIM(nik), '') IS NOT NULL
+            AND date_of_birth IS NOT NULL
+            AND NULLIF(BTRIM(gender), '') IS NOT NULL
+            AND NULLIF(BTRIM(phone_number), '') IS NOT NULL
+            AND NULLIF(BTRIM(address), '') IS NOT NULL
+        ),
+        updated_at = NOW()
+    WHERE id = $1
+`
+
+	result, err := tx.Exec(ctx, updatePatient, patientID)
+	if err != nil {
+		return fmt.Errorf("update patient verification status: %w", err)
+	}
+
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf(
+			"patient profile not found for verification %s",
+			verificationID,
+		)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit verification transaction: %w", err)
+	}
+
+	return nil
 }
 
 func (r *Repository) MarkRejected(
@@ -393,21 +416,119 @@ func (r *Repository) MarkRejected(
 	verificationID uuid.UUID,
 	reason string,
 ) error {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return errors.New("rejection reason is required")
+	}
+
 	const query = `
         UPDATE identity_verifications
         SET
             status = 'DOCUMENT_REJECTED',
             failure_reason = $2,
+            verified_at = NULL,
             updated_at = NOW()
         WHERE id = $1
+          AND status = 'MANUAL_REVIEW'
+          AND document_storage_key IS NOT NULL
+          AND document_storage_key <> ''
+          AND selfie_storage_key IS NOT NULL
+          AND selfie_storage_key <> ''
     `
 
-	_, err := r.db.Exec(
+	result, err := r.db.Exec(
 		ctx,
 		query,
 		verificationID,
 		reason,
 	)
+	if err != nil {
+		return fmt.Errorf("mark verification as rejected: %w", err)
+	}
 
-	return err
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf(
+			"verification not found or not eligible for rejection: %w",
+			ErrVerificationNotFound,
+		)
+	}
+
+	return nil
+}
+
+func (r *Repository) ListPendingReview(
+	ctx context.Context,
+) ([]AdminIdentityQueueItem, error) {
+	const query = `
+		SELECT
+			iv.id,
+			iv.patient_id,
+			iv.status,
+			iv.document_type,
+			iv.document_status,
+			iv.liveness_status,
+			iv.face_match_status,
+			iv.created_at,
+			pp.patient_code,
+			pp.full_name,
+			'****************' AS masked_nik,
+			pp.date_of_birth::text,
+			pp.gender
+		FROM identity_verifications iv
+		INNER JOIN patient_profiles pp
+			ON pp.id = iv.patient_id
+		WHERE iv.status = 'MANUAL_REVIEW'
+			AND iv.document_storage_key IS NOT NULL
+			AND iv.document_storage_key <> ''
+			AND iv.selfie_storage_key IS NOT NULL
+			AND iv.selfie_storage_key <> ''
+		ORDER BY iv.created_at ASC
+	`
+
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]AdminIdentityQueueItem, 0)
+
+	for rows.Next() {
+		var item AdminIdentityQueueItem
+		var createdAt time.Time
+		var fullName string
+		var dateOfBirth string
+		var gender string
+
+		if err := rows.Scan(
+			&item.ID,
+			&item.PatientID,
+			&item.Status,
+			&item.DocumentType,
+			&item.DocumentStatus,
+			&item.LivenessStatus,
+			&item.FaceMatchStatus,
+			&createdAt,
+			&item.Patient.PatientCode,
+			&fullName,
+			&item.Patient.MaskedNIK,
+			&dateOfBirth,
+			&gender,
+		); err != nil {
+			return nil, err
+		}
+
+		item.CreatedAt = createdAt.Format(time.RFC3339)
+		item.Patient.FullName = &fullName
+		item.Patient.DateOfBirth = &dateOfBirth
+		item.Patient.Gender = &gender
+
+		items = append(items, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return items, nil
 }
