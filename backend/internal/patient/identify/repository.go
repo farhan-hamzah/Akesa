@@ -258,16 +258,15 @@ func (r *Repository) UpdateDocument(
 	status VerificationStatus,
 ) (*Verification, error) {
 	const query = `
-    UPDATE identity_verifications
-    SET
-        document_storage_key = $2,
-        status = $3,
-        updated_at = NOW()
-    WHERE id = $1
-      AND status IN ('PENDING', 'PROCESSING')
-      AND $2 IS NOT NULL
-      AND $2 <> ''
-    RETURNING ` + selectColumns
+		UPDATE identity_verifications
+		SET
+			document_storage_key = $2,
+			status = $3,
+			updated_at = NOW()
+		WHERE id = $1
+		AND status IN ('PENDING', 'PROCESSING')
+		AND NULLIF(BTRIM($2::text), '') IS NOT NULL
+		RETURNING ` + selectColumns
 
 	verification := &Verification{}
 
@@ -303,16 +302,21 @@ func (r *Repository) UpdateSelfie(
             updated_at = NOW()
         WHERE id = $1
           AND document_storage_key IS NOT NULL
-          AND document_storage_key <> ''
+          AND NULLIF(BTRIM(document_storage_key), '') IS NOT NULL
           AND status IN ('PENDING', 'PROCESSING')
-          AND $2 IS NOT NULL
-          AND $2 <> ''
+          AND NULLIF(BTRIM($2::text), '') IS NOT NULL
         RETURNING ` + selectColumns
 
 	verification := &Verification{}
 
 	err := r.scanRow(
-		r.db.QueryRow(ctx, query, id, storageKey, status),
+		r.db.QueryRow(
+			ctx,
+			query,
+			id,
+			storageKey,
+			status,
+		),
 		verification,
 	)
 	if err != nil {

@@ -38,3 +38,26 @@ func TestAuditHashChainContinuity(t *testing.T) {
 		t.Fatalf("chain failure: Block 2 hash must not match when previous block was tampered")
 	}
 }
+
+func TestComputeHashStableAfterDBRoundTrip(t *testing.T) {
+	id := uuid.New()
+	actor := uuid.New()
+
+	ts := time.Now().UTC().Truncate(time.Microsecond)
+	original := []byte(`{"b":"2","a":"1"}`)
+	jsonbStyle := []byte(`{"a": "1", "b": "2"}`)
+	local := ts.In(time.FixedZone("WIB", 7*3600))
+
+	h1 := computeHash(genesisHash, "X", id, ActionProfileUpdated, actor, original, ts)
+	h2 := computeHash(genesisHash, "X", id, ActionProfileUpdated, actor, jsonbStyle, local)
+
+	if h1 != h2 {
+		t.Fatalf("hash must be stable after DB round-trip: %s != %s", h1, h2)
+	}
+}
+
+func TestGenesisHashLength(t *testing.T) {
+	if len(genesisHash) != 64 {
+		t.Fatalf("genesisHash must be 64 chars, got %d", len(genesisHash))
+	}
+}

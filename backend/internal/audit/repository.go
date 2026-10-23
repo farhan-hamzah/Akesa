@@ -1,17 +1,21 @@
 package audit
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const genesisHash = "0000000000000000000000000000000000000000000000000000000000000"
+const genesisHash = "0000000000000000000000000000000000000000000000000000000000000000"
 
 const chainName = "global"
 
@@ -44,19 +48,26 @@ func (r *Repository) InsertWithChain(
 		chainName,
 	).Scan(&prevHash)
 
-	if err != nil {
-		prevHash = genesisHash
+	if errors.Is(err, pgx.ErrNoRows) {
 		if _, insertErr := tx.Exec(
 			ctx,
 			`INSERT INTO audit_chain_state (chain_name, last_hash) VALUES ($1, $2)
-			 ON CONFLICT (chain_name) DO NOTHING`,
-			chainName, prevHash,
+		 ON CONFLICT (chain_name) DO NOTHING`,
+			chainName, genesisHash,
 		); insertErr != nil {
 			return nil, fmt.Errorf("seed chain state: %w", insertErr)
 		}
+		err = tx.QueryRow(
+			ctx,
+			`SELECT last_hash FROM audit_chain_state WHERE chain_name = $1 FOR UPDATE`,
+			chainName,
+		).Scan(&prevHash)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read chain state: %w", err)
 	}
 
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	hash := computeHash(prevHash, entityType, entityID, action, actorID, payload, now)
 
 	entry := &Log{
@@ -133,7 +144,7 @@ func (r *Repository) VerifyChainIntegrity(ctx context.Context) (bool, int, error
 		ctx,
 		`SELECT id, entity_type, entity_id, action, actor_id, payload, prev_hash, hash, created_at
 		 FROM audit_logs
-		 ORDER BY created_at ASC`,
+		 ORDER BY seq ASC`,
 	)
 	if err != nil {
 		return false, 0, fmt.Errorf("query audit logs: %w", err)
@@ -292,6 +303,23 @@ func (r *Repository) ListPatientTimeline(ctx context.Context, patientID uuid.UUI
 	return logs, rows.Err()
 }
 
+func canonicalPayload(p []byte) []byte {
+	if len(p) == 0 {
+		return p
+	}
+	dec := json.NewDecoder(bytes.NewReader(p))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return p
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return p
+	}
+	return out
+}
+
 func computeHash(
 	prevHash string,
 	entityType string,
@@ -307,7 +335,7 @@ func computeHash(
 	h.Write([]byte(entityID.String()))
 	h.Write([]byte(action))
 	h.Write([]byte(actorID.String()))
-	h.Write(payload)
-	h.Write([]byte(ts.Format(time.RFC3339Nano)))
+	h.Write(canonicalPayload(payload))
+	h.Write([]byte(ts.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)))
 	return hex.EncodeToString(h.Sum(nil))
 }

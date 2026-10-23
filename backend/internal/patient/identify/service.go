@@ -199,6 +199,12 @@ func (s *Service) UploadDocument(
 		storageKey,
 		reader,
 	); err != nil {
+		fmt.Printf(
+			"[IDENTITY] Upload KTP ke storage gagal. verification_id=%s, error=%v\n",
+			verification.ID,
+			err,
+		)
+
 		return nil, fmt.Errorf(
 			"upload identity document: %w",
 			err,
@@ -212,12 +218,18 @@ func (s *Service) UploadDocument(
 		StatusPending,
 	)
 	if err != nil {
-		_ = s.fileStorage.Delete(
-			ctx,
-			storageKey,
+		fmt.Printf(
+			"[IDENTITY] Update document ke database gagal. verification_id=%s, error=%v\n",
+			verification.ID,
+			err,
 		)
 
-		return nil, err
+		_ = s.fileStorage.Delete(ctx, storageKey)
+
+		return nil, fmt.Errorf(
+			"save identity document: %w",
+			err,
+		)
 	}
 
 	return updated, nil
@@ -267,15 +279,14 @@ func (s *Service) UploadSelfie(
 		extension,
 	)
 
-	if err := s.fileStorage.Upload(
-		ctx,
-		storageKey,
-		reader,
-	); err != nil {
-		return nil, fmt.Errorf(
-			"upload identity selfie: %w",
+	if err := s.fileStorage.Upload(ctx, storageKey, reader); err != nil {
+		fmt.Printf(
+			"[IDENTITY] Upload selfie ke storage gagal. verification_id=%s, error=%v\n",
+			verification.ID,
 			err,
 		)
+
+		return nil, fmt.Errorf("upload identity selfie: %w", err)
 	}
 
 	storageKeyPtr := &storageKey
@@ -287,11 +298,21 @@ func (s *Service) UploadSelfie(
 		StatusManualReview,
 	)
 	if err != nil {
-		_ = s.fileStorage.Delete(ctx, storageKey)
-		return nil, fmt.Errorf(
-			"save identity selfie: %w",
+		fmt.Printf(
+			"[IDENTITY] Update selfie ke database gagal. verification_id=%s, error=%v\n",
+			verification.ID,
 			err,
 		)
+
+		if deleteErr := s.fileStorage.Delete(ctx, storageKey); deleteErr != nil {
+			fmt.Printf(
+				"[IDENTITY] Cleanup selfie gagal. verification_id=%s, error=%v\n",
+				verification.ID,
+				deleteErr,
+			)
+		}
+
+		return nil, fmt.Errorf("save identity selfie: %w", err)
 	}
 
 	return updated, nil
